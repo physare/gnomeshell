@@ -29,6 +29,13 @@ START
      window says it's talking to an older copy, close it, end blender.exe in
      Task Manager if it's there, and start GnomeShell again.
 
+UPDATES
+  When GnomeShell opens it checks github.com/physare/gnomeshell for a newer
+  version. If there is one, an Update button shows at the top right: click
+  it and GnomeShell downloads the new version, puts it in this folder and
+  restarts. Your scans and settings are kept. Hover the button to see
+  what's new.
+
 USE
   1. Drop a latex scan onto the window (or pick a recent one). STL, OBJ,
      PLY and .blend files all open. From a .blend, every visible object
