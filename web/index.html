@@ -23,10 +23,15 @@
 <div class="app">
   <header class="top">
     <div class="brand">
-      <img src="logo.png" width="30" height="30" alt="" aria-hidden="true">
+      <img src="logo.png" width="26" height="26" alt="" aria-hidden="true">
       <span>GnomeShell</span>
     </div>
-    <button type="button" class="menu-btn" id="fileMenu" aria-haspopup="menu">File</button>
+    <nav class="menubar" aria-label="Menus">
+      <button type="button" class="menu-btn" id="fileMenu" aria-haspopup="menu">File</button>
+      <button type="button" class="menu-btn" id="editMenu" aria-haspopup="menu">Edit</button>
+      <button type="button" class="menu-btn" id="viewMenu" aria-haspopup="menu">View</button>
+      <button type="button" class="menu-btn" id="helpMenu" aria-haspopup="menu">Help</button>
+    </nav>
     <nav class="steps" aria-label="Steps">
       <button class="step" data-step="load" type="button">1 Load scan</button>
       <button class="step" data-step="cut" type="button" disabled>2 Prepare &amp; cut</button>
@@ -35,34 +40,39 @@
     <span class="file" id="fileName" data-raw></span>
     <span class="meta mono" id="fileMeta">Starting…</span>
   </header>
+  <div class="toolhdr" id="toolhdr" hidden>
+    <div class="tgrp" id="editTools">
+      <button type="button" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
+      <button type="button" id="redo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg></button>
+    </div>
+    <div class="tgrp" id="viewTools">
+      <button type="button" data-view="front" title="Front view (Numpad 1)">Front</button>
+      <button type="button" data-view="side" title="Side view (Numpad 3)">Side</button>
+      <button type="button" data-view="top" title="Top view (Numpad 7)">Top</button>
+      <button type="button" data-view="fit" title="Fit the view (F)">Fit</button>
+    </div>
+    <details class="show-menu" id="toggles" hidden>
+      <summary><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Show<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+      <div class="show-list">
+      <label for="tOver"><input id="tOver" type="checkbox" checked> Overhangs in red<kbd>X</kbd></label>
+      <label for="tPlanes"><input id="tPlanes" type="checkbox" checked> Cut planes</label>
+      <label for="tPieces"><input id="tPieces" type="checkbox" checked> Piece colors</label>
+      <label for="tPour"><input id="tPour" type="checkbox" checked> Pour collar</label>
+      <label for="tSlices"><input id="tSlices" type="checkbox" checked> Test slices<kbd>T</kbd></label>
+      <label for="tSeam"><input id="tSeam" type="checkbox" checked> Seam cards</label>
+      </div>
+    </details>
+    <div class="tgrp" id="doneTools" hidden>
+      <button type="button" data-show="shell" class="on">Shell</button>
+      <button type="button" data-show="latex">With latex</button>
+      <button type="button" data-show="slices">Test slices</button>
+      <button type="button" data-show="plates">Plates</button>
+    </div>
+    <span class="tfill"></span>
+    <button type="button" class="tbtn" id="panelBtn" title="Hide or show the side panel (N)" aria-label="Side panel" aria-pressed="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
+  </div>
 
   <div class="body">
-    <nav class="rail" id="rail" aria-label="Tools" hidden>
-      <div class="rgrp" id="viewTools">
-        <span class="tlabel">View</span>
-        <button type="button" data-view="front" title="Front view (Numpad 1)">Front</button>
-        <button type="button" data-view="side" title="Side view (Numpad 3)">Side</button>
-        <button type="button" data-view="top" title="Top view (Numpad 7)">Top</button>
-        <button type="button" data-view="fit" title="Fit the view (F)">Fit</button>
-      </div>
-      <span class="tsep" aria-hidden="true"></span>
-      <div class="rgrp" id="editTools">
-        <span class="tlabel">Edit</span>
-        <div class="two">
-          <button type="button" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
-          <button type="button" id="redo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg></button>
-        </div>
-        <span class="tsep" aria-hidden="true"></span>
-        <span class="tlabel">Pick</span>
-        <button type="button" data-mode="pieces" class="on" title="Click pieces in the view (P)" aria-label="Pick pieces">Pieces</button>
-        <button type="button" data-mode="lines" title="Click the lines between pieces (L)" aria-label="Pick lines">Lines</button>
-      </div>
-      <span class="tsep" aria-hidden="true"></span>
-      <span class="tlabel">Insert</span>
-      <button type="button" id="railIns" title="Just the insert and its holder, with the latex and shell grayed out (I)">Insert view</button>
-      <span class="rfill"></span>
-      <button type="button" id="keysBtn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
-    </nav>
     <main class="view" id="view">
       <canvas id="gl" role="img" aria-label="3D view of the scan"></canvas>
 
@@ -74,32 +84,34 @@
         <input id="fileInput" type="file" accept=".stl,.obj,.ply,.blend" hidden>
       </label>
 
+      <nav class="rail" id="rail" aria-label="Tools" hidden>
+        <button type="button" data-mode="pieces" class="on" aria-label="Pick pieces" data-tname="Pick pieces" data-tkey="P" data-tip="Click pieces in the view. Shift-click picks more than one, Ctrl+A picks them all."><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l14 7-6 2-2 6z"/></svg></button>
+        <button type="button" data-mode="lines" aria-label="Pick lines" data-tname="Pick lines" data-tkey="L" data-tip="Click the lines between pieces. Delete removes them, double-click picks the whole cut."><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 20L20 4M4 9V4h5M15 20h5v-5"/></svg></button>
+        <span class="rsep" aria-hidden="true"></span>
+        <button type="button" id="railCut" aria-label="Add a cut" data-tname="Add a cut" data-tkey="C" data-tip="Adds a cut through the whole shell. Drag the arrow to slide it, a ring to turn or tilt it."><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12"/></svg></button>
+        <button type="button" id="railOpt" aria-label="Optimize the open cut" data-tname="Optimize cut" data-tkey="O" data-tip="Turns and slides the open cut until the fewest faces would catch. Esc stops it."><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg></button>
+        <button type="button" id="railJoin" aria-label="Join the picked pieces" data-tname="Join pieces" data-tkey="M" data-tip="Joins the picked pieces back into one. Shift-click two or more pieces first."><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 4H4v4M16 4h4v4M8 20H4v-4M16 20h4v-4M9 12h6M12 9v6"/></svg></button>
+        <span class="rsep" aria-hidden="true"></span>
+        <button type="button" id="railScale" aria-label="Scale box" data-tname="Scale box" data-tkey="S" data-tip="Opens the Scan tab with the box round the latex. Drag a gold corner to scale it, Shift snaps to 5%."><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 3h6M3 3v6M21 21h-6M21 21v-6M3 3l7 7M21 21l-7-7"/></svg></button>
+        <button type="button" id="railRot" aria-label="Turn 90 degrees" data-tname="Turn 90°" data-tkey="R" data-tip="Turns the scan a quarter turn round Z. Shift+R turns it 15°."><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7M21 3v6h-6"/></svg></button>
+        <span class="rsep" aria-hidden="true"></span>
+        <button type="button" id="railIns" aria-label="Insert view" data-tname="Insert view" data-tkey="I" data-tip="Just the insert and its holder, with the latex and shell grayed out."><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg></button>
+        <span class="rsep" aria-hidden="true"></span>
+        <button type="button" id="keysBtn" aria-label="Keyboard shortcuts" data-tname="Shortcuts" data-tkey="?" data-tip="Every keyboard shortcut."><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/></svg></button>
+      </nav>
+
+      <svg class="axes" id="axes" width="84" height="84" viewBox="-42 -42 84 84" role="img" aria-label="View axes">
+        <g id="axesG"></g>
+      </svg>
+
       <div class="keys" id="keys" hidden role="dialog" aria-label="Keyboard shortcuts">
         <div class="keys-head"><span class="strong">Shortcuts</span><button type="button" class="x" id="keysClose" aria-label="Close">✕</button></div>
         <dl id="keysList"></dl>
       </div>
-      <details class="toolbar tr show-menu" id="toggles" hidden>
-        <summary>Show<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
-        <div class="show-list">
-        <label for="tOver"><input id="tOver" type="checkbox" checked> Overhangs in red</label>
-        <label for="tPlanes"><input id="tPlanes" type="checkbox" checked> Cut planes</label>
-        <label for="tPieces"><input id="tPieces" type="checkbox" checked> Piece colors</label>
-        <label for="tPour"><input id="tPour" type="checkbox" checked> Pour collar</label>
-        <label for="tSlices"><input id="tSlices" type="checkbox" checked> Test slices</label>
-        <label for="tSeam"><input id="tSeam" type="checkbox" checked> Seam cards</label>
-        </div>
-      </details>
-      <div class="toolbar tl" id="doneTools" hidden>
-        <button type="button" data-show="shell" class="on">Shell</button>
-        <button type="button" data-show="latex">With latex</button>
-        <button type="button" data-show="slices">Test slices</button>
-        <button type="button" data-show="plates">Plates</button>
-      </div>
       <div class="legend" id="legend" hidden>
-        <span><i class="sw" style="background:var(--bad)"></i>Faces the wrong way: would catch</span>
-        <span><i class="sw" style="background:linear-gradient(90deg,#5fa497 0 25%,#5a8cc4 25% 50%,#957dcb 50% 75%,#c9b45a 75%)"></i>Each piece in its own color: pulls off cleanly</span>
-        <span id="legSlice" hidden><i class="sw" style="background:var(--plan)"></i>Where the test slices are cut</span>
-        <span class="hint" id="hint">Pieces: click the model to pick a piece · Shift-click for more · right-click for options · drag an arrow tip to change how it pulls off</span>
+        <div class="leg-row"><i class="sw" style="background:var(--bad)"></i><span>Faces the wrong way: would catch</span><span class="leg-n mono" id="legBad"></span></div>
+        <div class="leg-row"><i class="sw" style="background:linear-gradient(90deg,#5fa497 0 25%,#5a8cc4 25% 50%,#957dcb 50% 75%,#c9b45a 75%)"></i><span>Each piece in its own color: pulls off cleanly</span><span class="leg-n mono" id="legOk"></span></div>
+        <div class="leg-row" id="legSlice" hidden><i class="sw" style="background:var(--plan)"></i><span>Where the test slices are cut</span><span class="leg-n mono" id="legSliceN"></span></div>
       </div>
       <div class="labels" id="labels"></div>
       <div class="toolbar tr ins-bar" id="insViewBar" hidden>
@@ -107,9 +119,13 @@
         <button type="button" class="btn sm" id="insViewBack">Back to the cuts</button>
       </div>
       <div class="hud" id="hud" role="status" aria-live="off" hidden>
-        <div class="hud-k">Overhang</div>
-        <div class="hud-v mono" id="hudPct">–</div>
-        <div class="hud-d mono" id="hudDelta"></div>
+        <svg class="gauge" width="84" height="50" viewBox="0 0 84 50" aria-hidden="true"><path class="g-bg" d="M8 44 A34 34 0 0 1 76 44" pathLength="100"/><path class="g-fg" id="hudArc" d="M8 44 A34 34 0 0 1 76 44" pathLength="100" stroke-dasharray="0 100"/></svg>
+        <div class="hud-mid">
+          <div class="hud-k">Overhang</div>
+          <div class="hud-v mono" id="hudPct">–</div>
+          <div class="hud-d mono" id="hudDelta"></div>
+        </div>
+        <span class="hud-sep" aria-hidden="true"></span>
         <div class="hud-s" id="hudSub"></div>
       </div>
       <label class="spread" id="spreadBox" for="spread" hidden>Pull apart<input id="spread" type="range" min="0" max="120" value="40"><span class="mono" id="spreadVal">40 mm</span></label>
@@ -126,7 +142,11 @@
     </main>
     <div class="ctx" id="ctx" role="menu" hidden></div>
 
-    <aside class="panel">
+    <aside class="panel" id="panel">
+      <section class="outliner" id="outliner" aria-label="Scene" hidden>
+        <div class="ol-head">Scene</div>
+        <div class="ol-tree" id="olTree" role="tree" aria-label="Scene"></div>
+      </section>
       <!-- step 1 -->
       <section class="pane" id="paneLoad">
         <div class="scroll">
@@ -141,10 +161,10 @@
       <!-- step 2 -->
       <section class="pane" id="paneCut" data-tab="cuts" hidden>
         <div class="ptabs" role="tablist" aria-label="Side panel" id="ptabs">
-          <button type="button" role="tab" data-tab="scan" aria-selected="false" title="Size and prepare the scan (1)">Scan<span class="n" id="tabScan"></span></button>
-          <button type="button" role="tab" data-tab="cuts" aria-selected="true" title="Cuts, pieces and saved layouts (2)">Cuts<span class="n" id="tabCuts"></span></button>
-          <button type="button" role="tab" data-tab="insert" aria-selected="false" title="Silicone insert (3)">Insert<span class="n" id="tabInsert"></span></button>
-          <button type="button" role="tab" data-tab="settings" aria-selected="false" title="Shell, channels, test slice and printer (4)">Settings<span class="n" id="tabSettings"></span></button>
+          <button type="button" role="tab" data-tab="scan" aria-selected="false" title="Size and prepare the scan (1)"><svg class="ti" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>Scan<span class="n" id="tabScan"></span></button>
+          <button type="button" role="tab" data-tab="cuts" aria-selected="true" title="Cuts, pieces and saved layouts (2)"><svg class="ti" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12"/></svg>Cuts<span class="n" id="tabCuts"></span></button>
+          <button type="button" role="tab" data-tab="insert" aria-selected="false" title="Silicone insert (3)"><svg class="ti" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 8h16v11H4z"/><path d="M8 8V5h8v3M12 12v4"/></svg>Insert<span class="n" id="tabInsert"></span></button>
+          <button type="button" role="tab" data-tab="settings" aria-selected="false" title="Shell, channels, test slice and printer (4)"><svg class="ti" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg>Settings<span class="n" id="tabSettings"></span></button>
         </div>
         <div class="scroll">
           <div class="scan-warn" id="scanWarn" role="alert" hidden>
@@ -505,6 +525,11 @@
       </section>
     </aside>
   </div>
+  <footer class="status" id="statusBar">
+    <span class="sb-keys" id="sbKeys"><span><kbd>Drag</kbd>Orbit</span><span><kbd>Right-drag</kbd>Pan</span><span><kbd>Scroll</kbd>Zoom</span></span>
+    <span class="hint" id="hint">Pieces: click the model to pick a piece · Shift-click for more · right-click for options · drag an arrow tip to change how it pulls off</span>
+    <span class="sb-right mono" id="sbRight"></span>
+  </footer>
 </div>
 <script type="module" src="app.js"></script>
 </body>

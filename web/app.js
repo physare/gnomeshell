@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.13.7"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.14.0"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -145,7 +145,7 @@ function placeLabels() {
     if (!off) L.el.style.transform = `translate(${((_lp.x + 1) / 2 * w).toFixed(1)}px, ${((1 - _lp.y) / 2 * h).toFixed(1)}px) translate(-50%, -50%)`;
   }
 }
-(function loop() { orbit.update(); renderer.render(scene, camera); placeLabels(); requestAnimationFrame(loop); })();
+(function loop() { orbit.update(); applyHidden(); renderer.render(scene, camera); placeLabels(); drawAxes(); requestAnimationFrame(loop); })();
 
 const center = () => new V3(...(S.scan?.center || [0, 0, 0]));
 const size = () => Math.max(...(S.scan?.dims || [200, 200, 200]));
@@ -409,6 +409,11 @@ function meter(T) {
   // the same number in the corner of the view, with what the last change did to it
   $("#hudPct").textContent = pct === null ? "–" : pct.toFixed(1) + "%";
   $("#hud").classList.toggle("warn", pct !== null && pct >= 2);
+  $("#hudArc").setAttribute("stroke-dasharray", `${pct === null ? 0 : Math.min(100, pct * 20).toFixed(1)} 100`); // the arc is full at 5%
+  $("#hudArc").style.opacity = pct ? 1 : 0;
+  { const n = T.pieces.length, catching = S.cuts.length ? [...badBy].filter((b, i) => b > 0.001 * (T.areaBy[i] || 1)).length : 0;
+    $("#legBad").textContent = S.cuts.length ? `${catching} ${catching === 1 ? "piece" : "pieces"}` : "";
+    $("#legOk").textContent = S.cuts.length ? `${n - catching} of ${n}` : ""; }
   const base = H.basePct, dEl = $("#hudDelta");
   if (pct !== null && base != null && Math.abs(pct - base) >= 0.05) {
     const down = pct < base;
@@ -581,6 +586,7 @@ function drawSlicePlan(T) {
   T.slicePlans = plans;
   groups.slicePlan.visible = S.step === "cut" && $("#tSlices").checked;
   $("#legSlice").hidden = !plans.length || !$("#tSlices").checked;
+  $("#legSliceN").textContent = plans.length ? String(plans.filter(Boolean).length) : "";
   sliceNote(plans);
   if (!plans.length) return;
   const w = Math.max(1.2, size() * 0.01);
@@ -1227,7 +1233,7 @@ function pickAt(e, kind) {
 const modeKind = () => (S.mode === "lines" ? "seg" : "piece");
 function setMode(m) {
   S.mode = m;
-  $$("#editTools [data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
+  $$("#rail [data-mode]").forEach((b) => { b.classList.toggle("on", b.dataset.mode === m); b.setAttribute("aria-pressed", String(b.dataset.mode === m)); });
   $("#hint").textContent = m === "lines" ?
     "Lines: click a line between pieces · Shift-click for more · Delete removes it · double-click picks the whole cut · right-click for options" :
     "Pieces: click the model to pick a piece · Shift-click for more · right-click for options · drag an arrow tip to change how it pulls off";
@@ -1302,7 +1308,7 @@ canvas.addEventListener("dblclick", (e) => {
   S.selSegs = new Set(S.T.segs.filter((x) => x.cut === s.cut).map((x) => x.key));
   S.active = s.cut; S.selCuts = new Set([s.cut]); renderCuts(); refresh();
 });
-$$("#editTools [data-mode]").forEach((b) => b.onclick = () => setMode(b.dataset.mode));
+$$("#rail [data-mode]").forEach((b) => b.onclick = () => setMode(b.dataset.mode));
 
 // ------------------------------------------------------------ right-click menus
 function openMenu(x, y, items) {
@@ -1322,8 +1328,8 @@ function openMenu(x, y, items) {
   m.style.top = Math.max(8, Math.min(y + 2, innerHeight - r.height - 8)) + "px";
   m.querySelector("button:not(:disabled)")?.focus();
 }
-function closeMenu() { $("#ctx").hidden = true; $("#ctx").classList.remove("file-menu"); }
-addEventListener("pointerdown", (e) => { if (!e.target.closest("#ctx") && !e.target.closest("#fileMenu")) closeMenu(); }, true);
+function closeMenu() { $("#ctx").hidden = true; $("#ctx").classList.remove("file-menu"); delete $("#ctx").dataset.menu; }
+addEventListener("pointerdown", (e) => { if (!e.target.closest("#ctx") && !e.target.closest(".menu-btn")) closeMenu(); }, true);
 addEventListener("resize", closeMenu);
 // the browser's own menu never shows over ours (on Windows it fires after the
 // button comes up, over whatever is under the mouse by then, often our menu);
@@ -1385,8 +1391,11 @@ const KEYS = [
   ["Ctrl+Z", "Undo"], ["Ctrl+Y or Ctrl+Shift+Z", "Redo"],
   ["Delete", "Remove the picked lines or cuts, or join the picked pieces"], ["Esc", "Clear the picks, close a menu, stop optimizing"],
   ["P / L", "Pick pieces / pick lines in the view"], ["Shift+click", "Pick more than one"], ["Ctrl+A", "Pick every piece"],
+  ["C", "Add a cut through the whole shell"], ["S", "Scale box: drag a gold corner to size the scan"], ["R / Shift+R", "Turn the scan 90° / 15° around Z"],
   ["Drag the arrow", "Slide the open cut"], ["Drag a ring", "Turn or tilt the open cut"], ["Shift while dragging", "Snap to 5° or 5%"],
   ["← →", "On a slider: 1° or 1% (Shift: 5)"], ["O", "Optimize the open cut"], ["M", "Join the picked pieces"],
+  ["H / Alt+H", "Hide the row picked in the Scene list / show everything"], ["X", "Overhangs in red on or off"], ["T", "Test slices on or off"],
+  ["N", "Hide or show the side panel"], ["Ctrl+S", "Save this cut layout"], ["Ctrl+B", "Build the shell"],
   ["F", "Fit the view"], ["Numpad 1 / 3 / 7", "Front / side / top view"], ["1 / 2 / 3 / 4", "Scan / Cuts / Insert / Settings tab"], ["I", "Insert view, when the insert is on"], ["?", "Show these keys"],
 ];
 $("#keysList").innerHTML = KEYS.map(([k, v]) => `<dt class="mono">${k}</dt><dd>${v}</dd>`).join("");
@@ -1432,6 +1441,9 @@ addEventListener("keydown", (e) => {
     p: () => setMode("pieces"), l: () => setMode("lines"),
     o: () => S.active != null && optimize(S.active, ["az", "tilt", "pos"]),
     m: () => mergePieces([...S.selPieces]), f: () => viewFrom("fit"),
+    c: () => { showTab("cuts"); $("#addCut").click(); },
+    s: () => showTab("scan"),
+    r: () => $(e.shiftKey ? '[data-rot="z,15"]' : '[data-rot="z,90"]').click(),
     "?": () => { $("#keys").hidden = !$("#keys").hidden; },
   }[e.key === "?" ? "?" : k];
   if (act) { e.preventDefault(); act(); }
@@ -2417,6 +2429,9 @@ function go(step) {
   $(".step[data-step=done]").disabled = !S.build;
   $("#paneLoad").hidden = step !== "load"; $("#paneCut").hidden = step !== "cut"; $("#paneDone").hidden = step !== "done";
   $("#drop").hidden = step !== "load";
+  $("#toolhdr").hidden = step === "load"; $("#outliner").hidden = step === "load"; renderOutliner();
+  if (step !== "cut") $("#hint").textContent = step === "done" ? "Scene list: the eye on a folder hides everything in it, the eye on a row just that part · Alt+H shows everything" : "Drop a scan on the view, or press Ctrl+O";
+  else if (S.T) setMode(S.mode || "pieces");
   $("#rail").hidden = step !== "cut"; $("#viewTools").hidden = step !== "cut"; $("#editTools").hidden = step !== "cut"; $("#toggles").hidden = step !== "cut"; $("#legend").hidden = step !== "cut"; $("#hud").hidden = step !== "cut";
   if (step !== "cut") { $("#keys").hidden = true; closeMenu(); }
   $("#labels").hidden = step !== "cut";
@@ -2496,7 +2511,7 @@ async function fileMenu() {
   openMenu(r.left, r.bottom + 2, items);
   $("#ctx").classList.add("file-menu");
 }
-$("#fileMenu").onclick = (e) => { e.stopPropagation(); if (!$("#ctx").hidden && $("#ctx").classList.contains("file-menu")) { closeMenu(); return; } fileMenu(); };
+$("#fileMenu").onclick = async (e) => { e.stopPropagation(); if (!$("#ctx").hidden && $("#ctx").dataset.menu === "file") { closeMenu(); return; } await fileMenu(); $("#ctx").dataset.menu = "file"; };
 addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") { e.preventDefault(); $("#fileInput").click(); }
 });
@@ -2620,6 +2635,7 @@ async function showBuild(res) {
     `<div><span class="chip">${ordinal(s)}</span><span>${ord.filter((o) => o.order === s).map((o) => o.name.replace("SHELL_", "Piece ")).join(", ")}</span></div>`).join("")}</div>` :
     ord.length ? '<p class="muted small">The pieces can come off in any order.</p>' : "";
   showFolder(res.folder);
+  renderOutliner();
 }
 function showFolder(path) {
   const el = $("#donePath"), name = String(path || "").split(/[\\/]/).filter(Boolean).pop() || "";
@@ -2661,7 +2677,7 @@ function drawPlates(res) {
     for (const it of pl.items) {
       const src = byName.get(it.name); if (!src) continue;
       const m = new THREE.Mesh(src.geometry, it.too_big ? new THREE.MeshStandardMaterial({ color: COL.bad, roughness: 0.6, side: THREE.DoubleSide }) : src.material);
-      m.matrixAutoUpdate = false; m.matrix.set(...it.matrix);
+      m.matrixAutoUpdate = false; m.matrix.set(...it.matrix); m.userData.name = it.name;
       if (it.ghost) m.renderOrder = 2;
       g.add(m);
       if (it.ghost) continue; // the poured silicone, in its mold: not printed, so no tag of its own
@@ -3245,7 +3261,7 @@ function applyInsView() {
   $("#insViewBar").hidden = !on;
   $("#railIns").classList.toggle("on", on);
   $("#railIns").setAttribute("aria-pressed", String(on));
-  $("#railIns").title = S.insert?.on ? "Just the insert and its holder, with the latex and shell grayed out (I)" : "Turn the silicone insert on first, on the Insert tab";
+  $("#railIns").dataset.tip = S.insert?.on ? "Just the insert and its holder, with the latex and shell grayed out." : "Turn the silicone insert on first, on the Insert tab.";
   paintTabs();
   if (S.step === "cut") { $("#legend").hidden = on; $("#hud").hidden = on; $("#labels").hidden = on; $("#toggles").hidden = on; }
   if (!on) return;
@@ -3508,7 +3524,7 @@ window.__ms = { showTab, splitPartOf, SPLIT, SEAM, curTab, sizerAt, drawSizer, s
   const target = (e) => {
     const el = e.target.closest?.("[title], [data-tip]");
     if (el && el.hasAttribute("title")) { el.dataset.tip = el.getAttribute("title"); el.removeAttribute("title"); }
-    return el && el.dataset.tip ? el : null;
+    return el && el.dataset.tip && !el.dataset.tname ? el : null; // the tool rail has tips of its own
   };
   document.addEventListener("pointerover", (e) => {
     const el = target(e); if (el === cur) return; hide(); if (!el) return;
@@ -3637,3 +3653,242 @@ window.__ms = { showTab, splitPartOf, SPLIT, SEAM, curTab, sizerAt, drawSizer, s
   window.__units = { get: () => U, conv };
   apply();
 })();
+
+// ------------------------------------------------------------ 0.14: scene list, axes, menus, tool rail, more keys
+// What the eye buttons in the scene list have hidden. Kept per name, so it
+// survives a rebuild of the same parts, and re-applied every frame because
+// other code turns groups back on as you work.
+// var, not const: the render loop and go() run before this part of the file does
+var HID = new Set();
+var OL = { open: new Set(["shell", "split", "insert", "cut-scan", "cut-guides"]), closed: new Set(), sel: null };
+function applyHidden() {
+  if (!HID) return;
+  if (HID.has("latex") && S.step === "cut") groups.latex.visible = false;
+  for (const g of [groups.pieces, groups.slices]) g.children.forEach((m) => { m.visible = !HID.has(m.userData.name); });
+  groups.plates.children.forEach((pl) => pl.children.forEach((m) => { if (m.userData.name) m.visible = !HID.has(m.userData.name); }));
+}
+// the cut step's rows stand for the Show menu's switches, so the two always agree
+const CUT_ROWS = [
+  { id: "latex", name: "Latex scan", kind: "scan" },
+  { id: "tPlanes", name: "Cut planes", kind: "cut", box: true },
+  { id: "tPieces", name: "Piece colors", kind: "piece", box: true },
+  { id: "tPour", name: "Pour collar", kind: "pour", box: true },
+  { id: "tSlices", name: "Test slices", kind: "test", box: true },
+  { id: "tSeam", name: "Seam cards", kind: "seam", box: true },
+];
+const OL_ICON = {
+  folder: '<path d="M3 6h6l2 2h10v11H3z"/>',
+  scan: '<path d="M12 3c-3 0-5 3-5 6 0 2 1 3 1 5-2 1-4 3-4 7h16c0-4-2-6-4-7 0-2 1-3 1-5 0-3-2-6-5-6z"/>',
+  piece: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>',
+  cut: '<path d="M4 20L20 4"/><path d="M4 14l6 6M14 4l6 6"/>',
+  pour: '<path d="M6 4h12l-2 16H8z"/>',
+  test: '<path d="M4 8h16M4 12h16M4 16h16"/>',
+  seam: '<rect x="5" y="3" width="14" height="18" rx="1"/>',
+  holder: '<path d="M4 8h16v11H4z"/><path d="M8 8V5h8v3"/>',
+};
+const EYE = '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
+const EYE_OFF = '<path d="M3 3l18 18"/><path d="M10.6 6.1A10 10 0 0 1 12 6c6 0 10 6 10 6a17 17 0 0 1-3 3.6M6.6 6.6C3.8 8.4 2 12 2 12s4 7 10 7a9 9 0 0 0 4-1"/>';
+const svgI = (body, cls = "") => `<svg class="${cls}" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+
+// the built parts, in folders: the mold shell (a piece split to fit the printer
+// gets a folder of its own inside it), the insert, the seam cards, the test slices
+function builtTree() {
+  const parts = groups.pieces.children.map((m) => m.userData), tests = groups.slices.children.map((m) => m.userData);
+  const leaf = (u, kind) => ({ id: u.name, name: u.label || u.name, kind });
+  const shell = [], splits = new Map();
+  for (const u of parts.filter((u) => u.kind === "piece")) {
+    const m = /^(SHELL_\d+)([A-Z])$/.exec(u.name);
+    if (!m) { shell.push(leaf(u, "piece")); continue; }
+    if (!splits.has(m[1])) splits.set(m[1], []);
+    splits.get(m[1]).push(leaf(u, "piece"));
+  }
+  for (const [base, kids] of splits) shell.push({ id: "split-" + base, name: `${base.replace("SHELL_", "Shell ")} · split to fit`, folder: true, kids });
+  shell.sort((a, b) => (a.id.replace("split-", "") > b.id.replace("split-", "") ? 1 : -1));
+  const tree = [];
+  if (shell.length) tree.push({ id: "shell", name: "Mold Shell", folder: true, kids: shell });
+  const ins = parts.filter((u) => ["holder", "cup", "insert", "pour"].includes(u.kind)).map((u) => leaf(u, u.kind === "holder" || u.kind === "cup" ? "holder" : "pour"));
+  if (ins.length) tree.push({ id: "insert", name: "Silicone insert", folder: true, kids: ins });
+  const seams = parts.filter((u) => u.kind === "seam").map((u) => leaf(u, "seam"));
+  if (seams.length) tree.push({ id: "seams", name: "Seam cards", folder: true, kids: seams });
+  if (tests.length) tree.push({ id: "tests", name: "Test slices", folder: true, kids: tests.map((u) => leaf(u, "test")) });
+  return tree;
+}
+function cutTree() {
+  const rows = CUT_ROWS.filter((r) => r.id !== "tSeam" || SEAM.cards.length).map((r) => ({ ...r }));
+  return [
+    { id: "cut-scan", name: "Scan", folder: true, kids: [{ ...rows[0], name: S.scan?.file || S.scan?.name || "Latex scan" }] },
+    { id: "cut-guides", name: "Guides", folder: true, kids: rows.slice(1) },
+  ];
+}
+const leaves = (n) => (n.folder ? n.kids.flatMap(leaves) : [n]);
+const isShown = (n) => (n.box ? $("#" + n.id).checked : !HID.has(n.id));
+function setShown(n, on) {
+  if (n.box) { const b = $("#" + n.id); if (b.checked !== on) { b.checked = on; b.dispatchEvent(new Event("change", { bubbles: true })); } return; }
+  if (on) HID.delete(n.id); else HID.add(n.id);
+  if (n.id === "latex" && on) groups.latex.visible = S.step === "cut";
+}
+let olTree = [];
+function renderOutliner() {
+  if (!OL_READY) return;
+  const box = $("#olTree"); if (!box) return;
+  olTree = S.step === "done" ? builtTree() : S.step === "cut" ? cutTree() : [];
+  const rows = [];
+  const walk = (n, depth) => {
+    const L = leaves(n), on = L.filter(isShown).length, all = on === L.length;
+    const open = n.folder && !OL.closed.has(n.id);
+    rows.push(`<div class="ol-row${OL.sel === n.id ? " sel" : ""}${on ? "" : " off"}" role="treeitem" aria-level="${depth + 1}" ${n.folder ? `aria-expanded="${open}"` : ""} aria-selected="${OL.sel === n.id}" data-id="${n.id}" style="--d:${depth}" tabindex="-1">` +
+      (n.folder ? `<button type="button" class="ol-fold" data-fold="${n.id}" aria-label="${open ? "Collapse" : "Expand"}">${svgI('<path d="M9 6l6 6-6 6"/>', open ? "rot" : "")}</button>` : `<span class="ol-fold"></span>`) +
+      svgI(OL_ICON[n.folder ? "folder" : n.kind] || OL_ICON.piece, "ol-ic k-" + (n.folder ? "folder" : n.kind)) +
+      `<span class="ol-name"></span>` +
+      `<span class="ol-meta">${n.folder && !all ? `${on} of ${L.length}` : n.folder ? L.length : ""}</span>` +
+      `<button type="button" class="ol-eye${on && !all ? " part" : ""}" data-eye="${n.id}" aria-pressed="${on > 0}" aria-label="${on ? "Hide" : "Show"}">${svgI(on ? EYE : EYE_OFF)}</button></div>`);
+    if (open) n.kids.forEach((k) => walk(k, depth + 1));
+  };
+  olTree.forEach((n) => walk(n, 0));
+  box.innerHTML = rows.join("");
+  // names come from files, so they go in as text
+  const byId = new Map(); const index = (n) => { byId.set(n.id, n); if (n.folder) n.kids.forEach(index); }; olTree.forEach(index);
+  box.querySelectorAll(".ol-row").forEach((r) => {
+    const n = byId.get(r.dataset.id); r.querySelector(".ol-name").textContent = n.name;
+    r.querySelector(".ol-eye").title = (isShown(n) || (n.folder && leaves(n).some(isShown)) ? "Hide " : "Show ") + n.name + (n.folder ? " and everything in it" : "");
+  });
+  renderOutliner.byId = byId;
+}
+function olToggle(id) {
+  const n = renderOutliner.byId?.get(id); if (!n) return;
+  const L = leaves(n), any = L.some(isShown);
+  L.forEach((l) => setShown(l, !any));
+  renderOutliner();
+}
+$("#olTree").addEventListener("click", (e) => {
+  const eye = e.target.closest("[data-eye]"), fold = e.target.closest("[data-fold]"), row = e.target.closest(".ol-row");
+  if (eye) { olToggle(eye.dataset.eye); return; }
+  if (fold) { const id = fold.dataset.fold; if (OL.closed.has(id)) OL.closed.delete(id); else OL.closed.add(id); renderOutliner(); return; }
+  if (row) { OL.sel = OL.sel === row.dataset.id ? null : row.dataset.id; renderOutliner(); }
+});
+$("#olTree").addEventListener("dblclick", (e) => { const row = e.target.closest(".ol-row"); if (row && !e.target.closest("button")) olToggle(row.dataset.id); });
+$$(".show-list input").forEach((b) => b.addEventListener("change", () => { if (S.step === "cut") renderOutliner(); }));
+function showAll() { HID.clear(); CUT_ROWS.filter((r) => r.box).forEach((r) => setShown(r, true)); if (S.step === "cut") groups.latex.visible = !insViewOn(); renderOutliner(); }
+function hideSelected() {
+  if (!OL.sel) { toast("Click a row in the Scene list first, then press H to hide it. Alt+H shows everything again.", true); return; }
+  const n = renderOutliner.byId?.get(OL.sel); if (!n) return;
+  leaves(n).forEach((l) => setShown(l, false)); renderOutliner();
+}
+
+// the little X / Y / Z axes in the corner turn with the view
+var AX = [["X", new V3(1, 0, 0), "#e5674a", "#1a0b08"], ["Y", new V3(0, 1, 0), "#7cb342", "#0d1a05"], ["Z", new V3(0, 0, 1), "#4f86f7", "#0b1220"]];
+var axesKey = "";
+function drawAxes() {
+  if (!AX) return;
+  const g = $("#axesG"); if (!g || $("#axes").hidden) return;
+  const q = camera.quaternion.clone().invert();
+  const pts = AX.map(([n, v, c, ink]) => { const p = v.clone().applyQuaternion(q); return { n, c, ink, x: p.x * 26, y: -p.y * 26, z: p.z }; });
+  const key = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(";");
+  if (key === axesKey) return; axesKey = key;
+  pts.sort((a, b) => a.z - b.z); // far ones first
+  g.innerHTML = '<circle cx="0" cy="0" r="3" fill="#4a5157"/>' + pts.map((p) =>
+    `<line x1="0" y1="0" x2="${p.x}" y2="${p.y}" stroke="${p.c}" stroke-width="2" opacity="${p.z < -0.2 ? 0.45 : 1}"/>` +
+    `<circle cx="${p.x}" cy="${p.y}" r="8" fill="${p.c}" opacity="${p.z < -0.2 ? 0.55 : 1}"/>` +
+    `<text x="${p.x}" y="${p.y + 3.5}" text-anchor="middle" font-size="10" font-weight="600" fill="${p.ink}">${p.n}</text>`).join("");
+}
+// click an axis ball to look down it
+$("#axes").addEventListener("click", (e) => {
+  const r = $("#axes").getBoundingClientRect(), x = e.clientX - r.left - r.width / 2, y = e.clientY - r.top - r.height / 2;
+  const q = camera.quaternion.clone().invert();
+  const hit = AX.map(([n, v]) => { const p = v.clone().applyQuaternion(q); return { n, d: Math.hypot(p.x * 26 - x, -p.y * 26 - y) }; }).sort((a, b) => a.d - b.d)[0];
+  if (hit && hit.d < 12) viewFrom({ X: "side", Y: "front", Z: "top" }[hit.n]);
+});
+
+// menus along the top
+function topMenu(id, items) {
+  const b = $("#" + id);
+  b.onclick = (e) => {
+    e.stopPropagation();
+    if (!$("#ctx").hidden && $("#ctx").dataset.menu === id) { closeMenu(); return; }
+    const r = b.getBoundingClientRect(); openMenu(r.left, r.bottom + 2, items().filter((it, i, a) => it !== "-" || (i && a[i - 1] !== "-")));
+    $("#ctx").classList.add("file-menu"); $("#ctx").dataset.menu = id;
+  };
+}
+const inCut = () => S.step === "cut" && !!S.T;
+topMenu("editMenu", () => [
+  { label: "Undo", key: "Ctrl+Z", disabled: !H.undo.length, act: undo },
+  { label: "Redo", key: "Ctrl+Y", disabled: !H.redo.length, act: redo },
+  "-",
+  { label: "Pick every piece", key: "Ctrl+A", disabled: !inCut(), act: pickAllPieces },
+  { label: "Clear the picks", key: "Esc", disabled: !inCut(), act: clearPicks },
+  { label: "Join the picked pieces", key: "M", disabled: !inCut() || S.selPieces.size < 2, act: () => mergePieces([...S.selPieces]) },
+  "-",
+  { label: "Add a cut", key: "C", disabled: !inCut(), act: railCut },
+  { label: "Save this layout", key: "Ctrl+S", disabled: !inCut(), act: saveLayout },
+  { label: "Build shell", key: "Ctrl+B", disabled: !inCut() || $("#build").disabled, act: () => startBuild(false) },
+]);
+topMenu("viewMenu", () => [
+  { label: "Front", key: "Numpad 1", disabled: S.step === "load", act: () => viewFrom("front") },
+  { label: "Side", key: "Numpad 3", disabled: S.step === "load", act: () => viewFrom("side") },
+  { label: "Top", key: "Numpad 7", disabled: S.step === "load", act: () => viewFrom("top") },
+  { label: "Fit", key: "F", disabled: S.step === "load", act: () => viewFrom("fit") },
+  "-",
+  { label: ($("#tOver").checked ? "Hide" : "Show") + " overhangs in red", key: "X", disabled: S.step !== "cut", act: () => flip("tOver") },
+  { label: ($("#tSlices").checked ? "Hide" : "Show") + " test slices", key: "T", disabled: S.step !== "cut", act: () => flip("tSlices") },
+  { label: (document.body.classList.contains("no-panel") ? "Show" : "Hide") + " the side panel", key: "N", act: togglePanel },
+  "-",
+  { label: "Hide the picked row", key: "H", disabled: !OL.sel, act: hideSelected },
+  { label: "Show everything", key: "Alt+H", act: showAll },
+]);
+topMenu("helpMenu", () => [
+  { label: "Keyboard shortcuts", key: "?", act: () => { $("#keys").hidden = false; } },
+  { label: `GnomeShell ${APP_VERSION}`, disabled: true, act: () => {} },
+]);
+
+// the tool rail
+function railCut() { if (!inCut()) return; showTab("cuts"); $("#addCut").click(); }
+$("#railCut").onclick = railCut;
+$("#railOpt").onclick = () => { if (S.active == null) { toast("Click a cut first, then optimize it.", true); return; } optimize(S.active, ["az", "tilt", "pos"]); };
+$("#railJoin").onclick = () => { if (S.selPieces.size < 2) { toast("Shift-click two or more pieces first, then join them.", true); return; } mergePieces([...S.selPieces]); };
+$("#railScale").onclick = () => showTab("scan");
+$("#railRot").onclick = (e) => $(e.shiftKey ? '[data-rot="z,15"]' : '[data-rot="z,90"]').click();
+function flip(id) { const b = $("#" + id); b.checked = !b.checked; b.dispatchEvent(new Event("change", { bubbles: true })); }
+function togglePanel() {
+  const off = document.body.classList.toggle("no-panel");
+  $("#panelBtn").setAttribute("aria-pressed", String(!off));
+  dispatchEvent(new Event("resize"));
+}
+$("#panelBtn").onclick = togglePanel;
+$("#sbRight").textContent = `GnomeShell ${APP_VERSION}`;
+
+// more keys, in every step
+addEventListener("keydown", (e) => {
+  if (e.target.matches("input[type=number], input[type=text], select, textarea") || !$("#busy").hidden) return;
+  const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
+  if (mod && k === "s") { e.preventDefault(); if (inCut()) saveLayout(); return; }
+  if (mod && k === "b") { e.preventDefault(); if (inCut() && !$("#build").disabled) startBuild(false); return; }
+  if (mod) return;
+  if (e.altKey && k === "h") { e.preventDefault(); showAll(); return; }
+  if (e.altKey || S.step === "load") return;
+  if (k === "h") { e.preventDefault(); hideSelected(); return; }
+  if (k === "n") { e.preventDefault(); togglePanel(); return; }
+  if (S.step !== "cut" || insViewOn()) return;
+  if (k === "x") { e.preventDefault(); flip("tOver"); return; }
+  if (k === "t") { e.preventDefault(); flip("tSlices"); }
+});
+
+// the tool rail's tips: name, key and a line on what it does, beside the button
+(() => {
+  const t = document.createElement("div"); t.className = "rtip"; t.setAttribute("role", "tooltip"); document.body.appendChild(t);
+  let timer = 0;
+  const hide = () => { clearTimeout(timer); t.classList.remove("show"); };
+  const show = (b) => {
+    t.innerHTML = '<div class="rtip-top"><span class="rtip-name"></span><kbd></kbd></div><div class="rtip-desc"></div>';
+    t.querySelector(".rtip-name").textContent = b.dataset.tname; t.querySelector("kbd").textContent = b.dataset.tkey; t.querySelector(".rtip-desc").textContent = b.dataset.tip || "";
+    const r = b.getBoundingClientRect(); t.style.left = r.right + 10 + "px"; t.style.top = Math.max(8, r.top + r.height / 2 - t.offsetHeight / 2) + "px";
+    t.classList.add("show");
+  };
+  $$("#rail [data-tname]").forEach((b) => {
+    b.addEventListener("pointerenter", () => { clearTimeout(timer); timer = setTimeout(() => show(b), t.classList.contains("show") ? 0 : 350); });
+    b.addEventListener("pointerleave", hide);
+    b.addEventListener("focus", () => show(b)); b.addEventListener("blur", hide);
+    b.addEventListener("click", hide);
+  });
+})();
+var OL_READY = true;
+renderOutliner();
