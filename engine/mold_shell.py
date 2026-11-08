@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Mold Shell Builder",
     "author": "Gnome and Garden",
-    "version": (0, 13, 2),
+    "version": (0, 13, 3),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar (N) > Mold Shell",
     "description": "Builds a split, 3D-printable mother mold shell around a latex mold scan",
@@ -784,15 +784,15 @@ def _drop_loose_bits(bm, keep_fraction=0.01):
                         stack.append(nb)
         vol = abs(sum(t.verts[0].co.dot(t.verts[1].co.cross(t.verts[2].co)) for t in part if len(t.verts) == 3)) / 6
         parts.append((vol, part))
-    if len(parts) < 2:
-        return 0
-    biggest = max(v for v, _ in parts)
-    drop = [p for v, p in parts if v < biggest * keep_fraction]
+    drop = []
+    if len(parts) > 1:
+        biggest = max(v for v, _ in parts)
+        drop = [p for v, p in parts if v < biggest * keep_fraction]
     for p in drop:
         bmesh.ops.delete(bm, geom=p, context="FACES_ONLY")
     bmesh.ops.delete(bm, geom=[e for e in bm.edges if not e.link_faces], context="EDGES")
     bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_edges], context="VERTS")
-    holes = [e for e in bm.edges if e.is_boundary]
+    holes = [e for e in bm.edges if e.is_boundary]  # also a pinhole a boolean left
     if holes:  # patch where a fin was attached
         bmesh.ops.holes_fill(bm, edges=holes, sides=0)
         bmesh.ops.triangulate(bm, faces=[f for f in bm.faces if len(f.verts) > 3])
@@ -1876,6 +1876,179 @@ def _cut_piece(shell, spec, lo_w, hi_w, min_vol):
     return a, hs
 
 
+def _tri_volume(co, tris):
+    a, b, c = co[tris[:, 0]], co[tris[:, 1]], co[tris[:, 2]]
+    return abs(float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum()) / 6.0)
+
+
+def _split_loose(obj):
+    """The object's separate solid bits, each an object of its own (just
+    [obj] when it's all one piece). Faces count as joined when they share an
+    edge, so the mesh itself is kept exactly as it is."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+    seen, comps = set(), []
+    for f in bm.faces:
+        if f.index in seen:
+            continue
+        stack, comp = [f], [f.index]
+        seen.add(f.index)
+        while stack:
+            cur = stack.pop()
+            for e in cur.edges:
+                for nb in e.link_faces:
+                    if nb.index not in seen:
+                        seen.add(nb.index)
+                        comp.append(nb.index)
+                        stack.append(nb)
+        comps.append(set(comp))
+    bm.free()
+    if len(comps) <= 1:
+        return [obj]
+    out = []
+    for keep in comps:
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        bm.faces.ensure_lookup_table()
+        bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.index not in keep], context="FACES")
+        out.append(_new_obj(obj.name + "_bit", bm, matrix=obj.matrix_world.copy()))
+    _remove(obj)
+    return out
+
+
+def _union_ok(target, other):
+    """Union other into target if that comes out a clean closed solid;
+    otherwise leave target as it was. True if it joined."""
+    keep = target.data.copy()
+    _fast_union(target, other)
+    if len(target.data.polygons) and not _open_edges(target.data):
+        bpy.data.meshes.remove(keep)
+        return True
+    old = target.data
+    target.data = keep
+    if old.users == 0:
+        bpy.data.meshes.remove(old)
+    return False
+
+
+def _props(obj):
+    """The object's own settings as plain values (they outlive the object)."""
+    return {k: (obj[k].to_list() if hasattr(obj[k], "to_list") else obj[k].to_dict() if hasattr(obj[k], "to_dict") else obj[k])
+            for k in obj.keys()}
+
+
+def _settle_bits(pieces, wall, report, small=0.15):
+    """A piece whose region catches the shell in more than one place would
+    print as separate bits. A small bit is joined onto the bit it meets across
+    a cut; a big one becomes a piece of its own. Each piece file is then one
+    solid part."""
+    from mathutils.kdtree import KDTree
+    props = [_props(obj) for obj, _ in pieces]
+    if os.environ.get("GS_DEBUG_SPLIT"):
+        print("[settle] open before", [_open_edges(o.data) for o, _ in pieces])
+    pulls = [pull for _, pull in pieces]
+    bits, dropped = [], 0  # [piece index, object, points, triangles, volume]
+    for i, (obj, _) in enumerate(pieces):
+        for o in _split_loose(obj):
+            co, tris = _world_tris(o)
+            tris = np.asarray(tris)
+            v = _tri_volume(co, tris)
+            if v <= (wall ** 3) * 0.001:
+                _remove(o)
+                dropped += 1
+                continue
+            bits.append([i, o, co, tris, v])
+    if len(bits) == len(pieces) and not dropped:
+        return pieces
+    main = {}
+    for b, (i, _, _, _, v) in enumerate(bits):
+        if i not in main or v > bits[main[i]][4]:
+            main[i] = b
+    pts = [(b, v) for b, bit in enumerate(bits) for v in bit[2]]
+    kd = KDTree(len(pts))
+    for j, (_, v) in enumerate(pts):
+        kd.insert(Vector(v), j)
+    kd.balance()
+
+    def touching(b):
+        """The other bits this bit meets face to face, and over how many faces."""
+        near = set()
+        for v in bits[b][2]:
+            for _, j, _ in kd.find_range(Vector(v), 2e-3):
+                if pts[j][0] != b:
+                    near.add(pts[j][0])
+        cnt = {}
+        cen = bits[b][2][bits[b][3]].mean(1)
+        for o in near:
+            tree = BVHTree.FromPolygons([tuple(x) for x in bits[o][2]], [tuple(t) for t in bits[o][3]])
+            n = sum(1 for c in cen if tree.find_nearest(Vector(c), 0.02)[0] is not None)
+            if n:
+                cnt[o] = n
+        return cnt
+    # where each bit ends up: its own piece's main part, a piece of its own,
+    # or (a small one) with the bit it meets over the most faces
+    home, follow = {}, {}
+    for b, (i, _, _, _, v) in enumerate(bits):
+        if main[i] == b:
+            home[b] = ("piece", i)
+        elif v >= small * bits[main[i]][4]:
+            home[b] = ("own", b)
+        else:
+            cnt = touching(b)
+            if cnt:
+                follow[b] = max(cnt, key=cnt.get)
+            elif v < 0.01 * bits[main[i]][4]:
+                home[b] = None  # a crumb touching nothing: as before, left out
+            else:
+                home[b] = ("own", b)
+
+    def resolve(b, seen=()):
+        if b in home:
+            return home[b]
+        if b in seen:
+            return ("own", b)  # small bits only touching each other: one piece
+        h = resolve(follow[b], seen + (b,))
+        home[b] = ("own", b) if h is None else h
+        return home[b]
+    for b in list(follow):
+        resolve(b)
+    groups = {}
+    for b in range(len(bits)):
+        if home[b] is None:
+            _remove(bits[b][1])
+            dropped += 1
+        else:
+            groups.setdefault(home[b], []).append(b)
+    out, joined, own = [], 0, 0
+    order = sorted(groups, key=lambda k: (k[0] != "piece", k[1]))
+    for key in order:
+        mine = sorted(groups[key], key=lambda b: -bits[b][4])
+        if key[0] == "piece":
+            mine.remove(main[key[1]])
+            mine.insert(0, main[key[1]])
+        i = key[1] if key[0] == "piece" else bits[key[1]][0]
+        target = bits[mine[0]][1]
+        alone = []
+        for b in mine[1:]:
+            if _union_ok(target, bits[b][1]):
+                _remove(bits[b][1])
+                joined += 1
+            else:
+                alone.append(b)  # wouldn't join cleanly: printed on its own
+        for o in [target] + [bits[b][1] for b in alone]:
+            for k, v in props[i].items():
+                o[k] = v
+            out.append((o, pulls[i]))
+        own += (key[0] == "own") + len(alone)
+    if os.environ.get("GS_DEBUG_SPLIT"):
+        print("[settle] open after", [(o.name, _open_edges(o.data)) for o, _ in out])
+    report["bits_joined"] = joined
+    report["bits_own_piece"] = own
+    report["loose_bits_removed"] = report.get("loose_bits_removed", 0) + dropped
+    return out
+
+
 def _keep_slice_plan(obj, spec):
     """Remember where this piece's test slice goes, as worked out in the app."""
     plan = spec.get("slice") or {}
@@ -1981,6 +2154,9 @@ def build_shell(latex_obj, auto_cut=True, test_slices=True, cuts=None, pieces=No
                 else:
                     _remove(o)
         pieces = nxt
+    # every piece one solid part: stray bits onto a neighbour, or their own piece
+    if len(pieces) > 1:
+        pieces = _settle_bits(pieces, wall, report)
 
     if ctx.get("bumps") and len(pieces) > 1:
         report["bumps"] = _add_bumps([o for o, _ in pieces], ctx["bumps"], p["bump_r_mm"] * mm, 0.3 * mm, mm)

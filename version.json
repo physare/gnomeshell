@@ -1,4 +1,4 @@
 {
-  "version": "0.13.2",
-  "notes": "- Seam cards now show as soon as you place them, with a Seam cards switch at the top to hide or show them.\n- Piece box outlines show all the time again, not only on hover.\n- Fit your printer: each part shows in its own colour instead of lines, and each cut has a numbered handle you drag to move it. New + Upright, across and + Upright, front-back buttons."
+  "version": "0.13.3",
+  "notes": "- Fit your printer: Suggest cuts only cuts the level that's too wide, and where the cut is solid, so you no longer get thin slivers or extra parts. An upright cut can go through the whole model or one level, and a part thinner than 20 mm is flagged.\n- Shell pieces split to fit the printer: separate bits left by a cut through a curved wall are joined back onto the part beside them, so every part prints in one piece.\n- A mold piece that used to come out in separate bits is fixed too: a small bit joins the piece next to it, a big one becomes a piece of its own."
 }

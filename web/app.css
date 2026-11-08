@@ -406,3 +406,5 @@ h2 { font-size: 11px; margin-top: 4px; }
 .menu-btn:hover, .menu-btn[aria-expanded="true"] { background: #2f3438; color: var(--text); }
 .units-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 2px 12px; }
 .units-row > span { color: var(--muted); font-size: 13px; }
+.split-cut .split-scope { grid-column: 1 / -1; width: 100%; height: 26px; padding: 3px 8px; border-radius: 4px; background: var(--field); border: 1px solid var(--field-line); font-size: 12px; margin-top: -2px; }
+.split-cut .split-scope:hover { border-color: #4a5157; }

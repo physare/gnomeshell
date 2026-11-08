@@ -42,7 +42,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.13.2"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.13.3"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -563,7 +563,7 @@ def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert
         vol = _printer(settings)
         for o in list(ms._pieces()):
             co, _ = ms._world_tris(o)
-            fx, fy = sp._footprint(co[::max(1, len(co) // 20000)])
+            fx, fy = sp._footprint(co[::max(1, len(co) // 20000)], vol=vol)
             if sp.fits((fx, fy, float(np.ptp(co[:, 2]))), vol)[0]:
                 continue
             progress(f"Splitting {o.name.replace('SHELL_', 'piece ')} to fit your printer")
@@ -571,7 +571,8 @@ def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert
             if not cuts:
                 continue
             rep = {}
-            parts = sp.split(o, cuts, float(settings["peg_d_mm"]), float(settings["peg_len_mm"]), float(settings["peg_clear_mm"]), report=rep)
+            parts = sp.split_regrouped(o, cuts, vol, float(settings["peg_d_mm"]), float(settings["peg_len_mm"]), float(settings["peg_clear_mm"]),
+                                       report=rep, progress=progress)
             parts.sort(key=lambda q: float(ms._world_tris(q)[0][:, 2].min()))
             # plain copies: values still tied to the piece would crash once it's removed
             props = {k: (o[k].to_list() if hasattr(o[k], "to_list") else o[k].to_dict() if hasattr(o[k], "to_dict") else o[k])
@@ -661,6 +662,7 @@ def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert
         "pieces": len(pieces), "channels": report.get("channels", 0),
         "skipped_channels": report.get("skipped_channels", 0),
         "loose_bits_removed": report.get("loose_bits_removed", 0),
+        "bits_joined": report.get("bits_joined", 0), "bits_own_piece": report.get("bits_own_piece", 0),
         "shell_style": "CONTOUR" if contour else "BOX",
         "notches": report.get("notches", 0), "bumps": report.get("bumps", 0),
         "split_pieces": split_pieces,
@@ -1102,7 +1104,7 @@ def _printer(settings):
 
 
 def _parts_report(co, cuts, vol):
-    parts = sp.part_sizes(co, cuts)
+    parts = sp.part_sizes(co, cuts, vol)
     for p in parts:
         p["fits"], p["over"] = sp.fits(p["dims"], vol)
     return parts
@@ -1262,7 +1264,7 @@ def job_split(cuts, open_folder=False):
         ms._write_stl(os.path.join(folder, name), co, tris)
         ms._write_stl(os.path.join(PREVIEW_DIR, f"PART_{k}.stl"), co, tris)
         dims = [round(float(x), 1) for x in np.ptp(co, axis=0)]
-        fx, fy = sp._footprint(co[::max(1, len(co) // 20000)])
+        fx, fy = sp._footprint(co[::max(1, len(co) // 20000)], vol=vol)
         fit, over = sp.fits((fx, fy, dims[2]), vol)
         out.append({"file": name, "dims": [round(fx, 1), round(fy, 1), dims[2]], "fits": fit, "over": over,
                     "closed": not ms._open_edges(o.data), "url": f"/api/preview/PART_{k}.stl?rev={STATE['split_rev']}"})

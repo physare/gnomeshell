@@ -1,6 +1,7 @@
 """Split a model that's too big for the printer into parts that fit, with a peg
 on one side of each cut and a matching hole on the other."""
 import math
+import os
 
 import bmesh
 import bpy
@@ -186,9 +187,11 @@ def fits(dims, vol):
     return over == 0 and flat == 0, round(over + flat, 1)
 
 
-def _footprint(co, angle_steps=18):
-    """Smallest x, y extent of the points turned about the vertical (0-90°)."""
-    best = None
+def _footprint(co, angle_steps=18, vol=None):
+    """Smallest x, y extent of the points turned about the vertical (0-90°).
+    Given the printer, a turn that fits its bed wins over a smaller one that
+    doesn't (a long thin part fits along the bed, not across its corner)."""
+    best = fit = None
     for k in range(angle_steps + 1):
         a = math.radians(90.0 * k / angle_steps)
         c, s = math.cos(a), math.sin(a)
@@ -197,17 +200,67 @@ def _footprint(co, angle_steps=18):
         e = (float(np.ptp(x)), float(np.ptp(y)))
         if best is None or e[0] * e[1] < best[0] * best[1]:
             best = e
-    return best
+        if vol is not None and fits(e + (0.0,), (vol[0], vol[1], 1e9))[0] and (fit is None or e[0] * e[1] < fit[0] * fit[1]):
+            fit = e
+    return fit or best
 
 
-def part_sizes(co, cuts):
+def _is_level(c):
+    return abs(float(c["normal"][2])) > 0.9
+
+
+def _levels(cuts):
+    """Heights of the level cuts, lowest first. They split the model into
+    bands: band 0 below the lowest, then up."""
+    return np.array(sorted(float(c["point"][2]) for c in cuts if _is_level(c)))
+
+
+def _band(z, levels):
+    """Which band points at these heights are in (most of them)."""
+    if not len(levels) or not len(z):
+        return 0
+    return int(np.median(np.searchsorted(levels, z, side="right")))
+
+
+def _order(cuts):
+    """Level cuts first (they go right through), then the upright ones, which
+    may only cut one band."""
+    return sorted(range(len(cuts)), key=lambda k: not _is_level(cuts[k]))
+
+
+def _applies(c, pts, levels, cuts):
+    """Does this cut go through the part with these points? A level cut goes
+    through everything. An upright one can be kept to one band ("band") and
+    to one side of other upright cuts ("within": [[cut index, +1 or -1]])."""
+    if _is_level(c) or not len(pts):
+        return True
+    b = c.get("band")
+    if b is not None and len(levels) and _band(pts[:, 2], levels) != int(b):
+        return False
+    for k, s in c.get("within") or []:
+        k = int(k)
+        if not 0 <= k < len(cuts):
+            continue
+        o = cuts[k]
+        side = float(np.median((pts - np.array(o["point"], float)) @ np.array(o["normal"], float))) >= 0
+        if side != (float(s) > 0):
+            return False
+    return True
+
+
+def part_sizes(co, cuts, vol=None):
     """Rough size of each part the cuts make (by sorting points into them)."""
     groups = [np.ones(len(co), bool)]
-    for c in cuts:
+    levels = _levels(cuts)
+    for k in _order(cuts):
+        c = cuts[k]
         p, n = np.array(c["point"], float), np.array(c["normal"], float)
         side = (co - p) @ n >= 0
         new = []
         for g in groups:
+            if not _applies(c, co[g], levels, cuts):
+                new.append(g)  # an upright cut kept to another part
+                continue
             for s in (side, ~side):
                 m = g & s
                 if m.sum() > 10:
@@ -216,7 +269,7 @@ def part_sizes(co, cuts):
     out = []
     for m in groups:
         pts = co[m]
-        fx, fy = _footprint(pts[::max(1, len(pts) // 20000)])
+        fx, fy = _footprint(pts[::max(1, len(pts) // 20000)], vol=vol)
         out.append({"dims": [round(fx, 1), round(fy, 1), round(float(np.ptp(pts[:, 2])), 1)],
                     "z": [round(float(pts[:, 2].min()), 1), round(float(pts[:, 2].max()), 1)],
                     "x0": float(pts[:, 0].min())})
@@ -230,6 +283,7 @@ def suggest(obj, vol, peg_d=8.0, margin=4.0):
     peg), then upright cuts if a part is still too wide."""
     W, D, H = [float(x) for x in vol]
     co, tris = ms._world_tris(obj)
+    tris = np.asarray(tris)
     z0, z1 = float(co[:, 2].min()), float(co[:, 2].max())
     tall = z1 - z0
     room = H - margin
@@ -258,26 +312,93 @@ def suggest(obj, vol, peg_d=8.0, margin=4.0):
                     best, bz = score, z
             cuts.append({"point": [0.0, 0.0, round(bz, 1)], "normal": [0.0, 0.0, 1.0], "kind": "level"})
             prev = bz
-    # still too wide: upright cuts through the whole model along its longer side
-    fx, fy = _footprint(co[::max(1, len(co) // 20000)])
-    for axis, ext, lim in ((0, float(np.ptp(co[:, 0])), max(W, D)), (1, float(np.ptp(co[:, 1])), min(W, D))):
-        if fits((fx, fy, 0), (W, D, 1e9))[0]:
-            break
-        if ext <= lim:
+    # a band still too wide: upright cuts through that band only, so a part
+    # that already fits isn't cut up for nothing
+    levels = [c["point"][2] for c in cuts]
+    edges = [-1e9] + levels + [1e9]
+    cz = co[:, 2]
+    tz = co[tris][:, :, 2].mean(1)
+    for b in range(len(edges) - 1):
+        m = (cz >= edges[b]) & (cz < edges[b + 1])
+        if m.sum() < 10:
             continue
-        k = int(math.ceil(ext / (lim - margin)))
-        a0 = float(co[:, axis].min())
+        sel = (tz >= edges[b]) & (tz < edges[b + 1])
+        band = b if levels else None
+        first = _axis_cuts(co[m], co, tris[sel], W, D, margin, peg_d, band, None, len(cuts), max(W, D))
+        cuts += first
+        # a part along the first cuts still too big: cut that part only, the other way
+        if first:
+            axis = 0 if first[0]["kind"] == "x" else 1
+            at = [-1e9] + [c["point"][axis] for c in first] + [1e9]
+            idx = list(range(len(cuts) - len(first), len(cuts)))
+            for j in range(len(at) - 1):
+                inp = m & (co[:, axis] >= at[j]) & (co[:, axis] < at[j + 1])
+                tc = co[tris][:, :, axis].mean(1)
+                within = ([[idx[j - 1], 1]] if j > 0 else []) + ([[idx[j], -1]] if j < len(idx) else [])
+                cuts += _axis_cuts(co[inp], co, tris[sel & (tc >= at[j]) & (tc < at[j + 1])], W, D, margin, peg_d, band,
+                                   within, len(cuts), min(W, D), axis=1 - axis)
+        else:
+            cuts += _axis_cuts(co[m], co, tris[sel], W, D, margin, peg_d, band, None, len(cuts), min(W, D), short=True)
+    return cuts
+
+
+def _axis_cuts(pts, co, tris, W, D, margin, peg_d, band, within, base, lim, axis=None, short=False):
+    """Upright cuts along one axis so these points fit: each placed (within
+    what still fits) where the cut is solid with room for pegs, and never so
+    near the edge or another cut that it leaves a thin sliver."""
+    out = []
+    if len(pts) < 10:
+        return out
+    fx, fy = _footprint(pts[::max(1, len(pts) // 20000)], vol=(W, D))
+    if fits((fx, fy, 0), (W, D, 1e9))[0]:
+        return out
+    ext = np.ptp(pts[:, :2], axis=0)
+    if axis is None:
+        axis = 0 if ext[0] >= ext[1] else 1
+        if short:  # the long side fits: cut across the short one
+            axis = 1 - axis
+    for _ in (0,):
+        e = float(ext[axis])
+        if e <= lim:
+            return out
+        room = lim - margin
+        k = int(math.ceil(e / room))
+        a0, a1 = float(pts[:, axis].min()), float(pts[:, axis].max())
+        least = max(15.0, 0.4 * e / k)  # no part thinner than this
+        prev, at = a0, []
         for c in range(1, k):
-            pt = [0.0, 0.0, 0.0]
-            pt[axis] = round(a0 + ext * c / k, 1)
+            lo = max(prev + least, a1 - (k - c) * room)
+            hi = min(prev + room, a1 - (k - c) * least)
+            if hi < lo:
+                lo = hi = (lo + hi) / 2
+            mid = a0 + e * c / k
             nn = [0.0, 0.0, 0.0]
             nn[axis] = 1.0
-            cuts.append({"point": pt, "normal": nn, "kind": "x" if axis == 0 else "y"})
-        if axis == 0:
-            fx = ext / k
-        else:
-            fy = ext / k
-    return cuts
+            best, bx = None, mid if lo <= mid <= hi else (lo + hi) / 2
+            steps = min(60, max(1, int((hi - lo) / 2.0)))
+            for t in range(steps + 1):
+                x = lo + (hi - lo) * t / steps
+                pt = [0.0, 0.0, 0.0]
+                pt[axis] = x
+                isl = section_info(co, tris, pt, nn)["islands"] if len(tris) else []
+                if not isl:
+                    continue
+                pegs_ok = all(i["depth"] >= peg_d / 2 + 2 for i in isl)
+                score = (-len(isl) * 10 + (5 if pegs_ok else 0) + min(i["depth"] for i in isl) / max(peg_d, 1)
+                         - abs(x - mid) / max(room, 1) * 2)
+                if best is None or score > best:
+                    best, bx = score, x
+            pt = [0.0, 0.0, 0.0]
+            pt[axis] = round(bx, 1)
+            cut = {"point": pt, "normal": nn, "kind": "x" if axis == 0 else "y"}
+            if band is not None:
+                cut["band"] = band
+            if within:
+                cut["within"] = within
+            out.append(cut)
+            at.append(bx)
+            prev = bx
+    return out
 
 
 def _peg_tool(spots, n, r, length, name):
@@ -287,7 +408,30 @@ def _peg_tool(spots, n, r, length, name):
     return ms._new_obj(name, bm)
 
 
-def split(obj, cuts, peg_d=8.0, peg_len=10.0, clear=0.2, report=None, progress=None):
+def _add_pegs(part, up, spots, n, peg_len, r, clear):
+    """Pegs on part (the - side of the cut) at these spots, holes to match in up
+    (the + side). How many went on, or None when the walls are too thin."""
+    L = peg_len
+    for side, sgn in ((up, 1), (part, -1)):
+        sco, stris = ms._world_tris(side)
+        tree = BVHTree.FromPolygons([tuple(x) for x in sco], [tuple(t) for t in stris])
+        for q in spots:
+            h = tree.ray_cast(q + n * sgn * 0.05, n * sgn, 1e5)
+            if h[0] is not None:
+                L = min(L, (h[0] - q).length - 2.0)  # not out through the far side
+    L = max(0.0, L)
+    if L < 3.0:
+        return None
+    peg = _peg_tool([q + n * (L / 2 - 1.0) for q in spots], n, r, L + 2.0, "ms_tmp_pegs")
+    ms._fast_union(part, peg)
+    ms._remove(peg)
+    hole = _peg_tool([q + n * (L / 2 + 0.25) for q in spots], n, r + clear, L + 0.5 + 0.01, "ms_tmp_holes")
+    ms._fast_bool(up, hole, "DIFFERENCE")
+    ms._remove(hole)
+    return len(spots)
+
+
+def split(obj, cuts, peg_d=8.0, peg_len=10.0, clear=0.2, report=None, progress=None, pegs_on=True):
     """The parts, each a new object. Each cut: the piece on the + side of the
     plane gets the holes, the - side keeps a peg sticking out into them."""
     report = report if report is not None else {}
@@ -298,19 +442,20 @@ def split(obj, cuts, peg_d=8.0, peg_len=10.0, clear=0.2, report=None, progress=N
     size = float(np.ptp(co_all, axis=0).max()) * 4 + 100
     pegs = 0
     r = peg_d / 2
-    for k, c in enumerate(cuts):
+    levels = _levels(cuts)
+    for step, k in enumerate(_order(cuts)):
+        c = cuts[k]
         if progress:
-            progress(f"Cutting {k + 1} of {len(cuts)}")
+            progress(f"Cutting {step + 1} of {len(cuts)}")
         p, n = Vector(c["point"]), Vector(c["normal"]).normalized()
         nxt = []
         for part in parts:
             co, tris = ms._world_tris(part)
             d = (co - np.array(p)) @ np.array(n)
-            if d.min() >= -1e-6 or d.max() <= 1e-6:
+            if d.min() >= -1e-6 or d.max() <= 1e-6 or not _applies(c, co, levels, cuts):
                 nxt.append(part)  # this cut misses this part
                 continue
-            info = section_info(co, tris, p, n)
-            spots = peg_spots(info, peg_d)
+            spots = peg_spots(section_info(co, tris, p, n), peg_d) if pegs_on else []
             hs = ms._halfspace(p, n, size)
             up = part.copy()
             up.data = part.data.copy()
@@ -318,27 +463,14 @@ def split(obj, cuts, peg_d=8.0, peg_len=10.0, clear=0.2, report=None, progress=N
             ms._fast_bool(up, hs, "INTERSECT")
             ms._fast_bool(part, hs, "DIFFERENCE")
             ms._remove(hs)
-            if spots:
-                # how far each peg may go: not out through the far side
-                L = peg_len
-                for side, sgn in ((up, 1), (part, -1)):
-                    sco, stris = ms._world_tris(side)
-                    tree = BVHTree.FromPolygons([tuple(x) for x in sco], [tuple(t) for t in stris])
-                    for q in spots:
-                        h = tree.ray_cast(q + n * sgn * 0.05, n * sgn, 1e5)
-                        if h[0] is not None:
-                            L = min(L, (h[0] - q).length - 2.0)
-                L = max(0.0, L)
-                if L >= 3.0:
-                    peg = _peg_tool([q + n * (L / 2 - 1.0) for q in spots], n, r, L + 2.0, "ms_tmp_pegs")
-                    ms._fast_union(part, peg)
-                    ms._remove(peg)
-                    hole = _peg_tool([q + n * (L / 2 + 0.25) for q in spots], n, r + clear, L + 0.5 + 0.01, "ms_tmp_holes")
-                    ms._fast_bool(up, hole, "DIFFERENCE")
-                    ms._remove(hole)
-                    pegs += len(spots)
-                else:
+            if not pegs_on:
+                pass
+            elif spots:
+                got = _add_pegs(part, up, spots, n, peg_len, r, clear)
+                if got is None:
                     report.setdefault("too_thin", []).append(k + 1)
+                else:
+                    pegs += got
             else:
                 report.setdefault("no_room", []).append(k + 1)
             for o in (part, up):
@@ -348,4 +480,151 @@ def split(obj, cuts, peg_d=8.0, peg_len=10.0, clear=0.2, report=None, progress=N
                     ms._remove(o)
         parts = nxt
     report["pegs"] = pegs
+    return parts
+
+
+# ---- shell pieces: as few parts as fit, no loose scraps ---------------------
+
+def _signed_volume(co, tris):
+    a, b, c = co[tris[:, 0]], co[tris[:, 1]], co[tris[:, 2]]
+    return float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum()) / 6.0
+
+
+def _caps(co, tris, planes, eps=1e-3):
+    """For each plane, the triangles lying flat on it (where a cut left a face)."""
+    out = []
+    for p, n in planes:
+        on = np.abs((co - p) @ n) < eps
+        out.append(np.where(on[tris].all(1))[0])
+    return out
+
+
+def split_regrouped(obj, cuts, vol, peg_d=8.0, peg_len=10.0, clear=0.2, report=None, progress=None):
+    """Like split, for a shell piece: a flat cut through a curved wall can leave
+    several separate bits on each side, so cut into all the bits first, then
+    join bits back together across the cuts wherever the joined part still
+    fits the printer. That leaves as few parts as fit, each in one piece, and
+    no loose scraps. Pegs go where two parts still meet, if the wall has room."""
+    report = report if report is not None else {}
+    W, D, H = [float(x) for x in vol]
+    orig_co, orig_tris = ms._world_tris(obj)
+    orig_tris = np.asarray(orig_tris)
+    if os.environ.get("GS_DEBUG_SPLIT"):
+        ms._write_stl(os.path.join(os.environ["GS_DEBUG_SPLIT"], obj.name + ".stl"), orig_co, orig_tris)
+    planes = [(np.array(c["point"], float), np.array(c["normal"], float) / np.linalg.norm(c["normal"])) for c in cuts]
+    cells = split(obj, cuts, peg_d, peg_len, clear, report={}, progress=progress, pegs_on=False)
+    # every separate bit, each its own object, the mesh kept as the cut left it
+    frags = []  # (points, triangles, object)
+    for o in cells:
+        for q in ms._split_loose(o):
+            co, tris = ms._world_tris(q)
+            tris = np.asarray(tris)
+            if abs(_signed_volume(co, tris)) < 1.0:
+                ms._remove(q)  # a paper-thin fin, nothing to print
+                continue
+            frags.append((co, tris, q))
+    if progress:
+        progress("Joining the bits that fit together")
+    # which bits touch across a cut, and by how much
+    from mathutils.kdtree import KDTree
+    capv = []
+    for i, (co, tris, _) in enumerate(frags):
+        on = np.zeros(len(co), bool)
+        for p, n in planes:
+            on |= np.abs((co - p) @ n) < 1e-3
+        capv += [(i, v) for v in co[on]]
+    touch = {}
+    if capv:
+        kd = KDTree(len(capv))
+        for j, (_, v) in enumerate(capv):
+            kd.insert(Vector(v), j)
+        kd.balance()
+        for i, v in capv:
+            for _, j, _ in kd.find_range(Vector(v), 2e-3):
+                g = capv[j][0]
+                if g != i:
+                    key = (min(i, g), max(i, g))
+                    touch[key] = touch.get(key, 0) + 1
+    touch = {k: v for k, v in touch.items() if v >= 6}  # both ways round: 3 points or more
+    # join the smallest bits into a neighbour first, as long as the join still fits
+    groups = {i: [i] for i in range(len(frags))}
+    pts = {i: f[0][::max(1, len(f[0]) // 3000)] for i, f in enumerate(frags)}
+    fvol = [abs(_signed_volume(f[0], f[1])) for f in frags]
+    size = dict(enumerate(fvol))
+    adj = dict(touch)
+    while True:
+        best = None
+        for (a, b), cnt in adj.items():
+            q = np.vstack([pts[a], pts[b]])
+            if float(np.ptp(q[:, 2])) > H:
+                continue
+            if not fits(_footprint(q, vol=(W, D)) + (0.0,), (W, D, 1e9))[0]:
+                continue
+            key = (min(size[a], size[b]), -cnt)
+            if best is None or key < best[0]:
+                best = (key, a, b)
+        if best is None:
+            break
+        _, a, b = best
+        groups[a] += groups.pop(b)
+        q = np.vstack([pts[a], pts.pop(b)])
+        pts[a] = q[::max(1, len(q) // 3000)]
+        size[a] += size.pop(b)
+        nadj = {}
+        for (x, y), cnt in adj.items():
+            x, y = (a if x == b else x), (a if y == b else y)
+            if x != y:
+                key = (min(x, y), max(x, y))
+                nadj[key] = nadj.get(key, 0) + cnt
+        adj = nadj
+    if os.environ.get("GS_DEBUG_SPLIT"):
+        print("[split] cuts", cuts)
+        for i, (co, tris, _) in enumerate(frags):
+            print("[split] bit", i, np.ptp(co, 0).round(1).tolist(), round(abs(_signed_volume(co, tris))))
+        print("[split] touch", touch)
+        print("[split] groups", groups)
+    # build each part: its bits joined into one solid (a bit that won't join
+    # cleanly is printed on its own rather than risk a broken part)
+    parts = []
+    for gi, members in groups.items():
+        members = sorted(members, key=lambda m: -fvol[m])
+        target = frags[members[0]][2]
+        for m in members[1:]:
+            if ms._union_ok(target, frags[m][2]):
+                ms._remove(frags[m][2])
+            else:
+                parts.append(frags[m][2])
+        parts.append(target)
+    # pegs where two parts still meet across a cut
+    pegs, r = 0, peg_d / 2
+    for k, (p, n) in enumerate(planes):
+        spots = peg_spots(section_info(orig_co, orig_tris, p, n), peg_d)
+        if not spots:
+            continue
+        info = []
+        for o in parts:
+            co, tris = ms._world_tris(o)
+            tris = np.asarray(tris)
+            cap = _caps(co, tris, [(p, n)])[0]
+            side = float(np.median((co - p) @ n)) >= 0
+            info.append((BVHTree.FromPolygons([tuple(x) for x in co], [tuple(t) for t in tris[cap]]) if len(cap) else None, side))
+        pairs = {}
+        for q in spots:
+            lo = hi = None
+            for j, (tree, side) in enumerate(info):
+                if tree is not None and tree.find_nearest(q, 0.1)[0] is not None:
+                    if side:
+                        hi = j
+                    else:
+                        lo = j
+            if lo is not None and hi is not None:
+                pairs.setdefault((lo, hi), []).append(q)
+        for (lo, hi), qs in pairs.items():
+            got = _add_pegs(parts[lo], parts[hi], qs, Vector(n), peg_len, r, clear)
+            if got is None:
+                report.setdefault("too_thin", []).append(k + 1)
+            else:
+                pegs += got
+    report["pegs"] = pegs
+    report["bits"] = len(frags)
     return parts

@@ -96,13 +96,21 @@ USE
          shows in its own colour on the model, and each cut has a numbered
          orange handle: drag it to move that cut, or use its slider or type
          a number. + Level cut, + Upright, across and + Upright, front-back
-         add a cut. Split and save parts
+         add a cut. An upright cut can go through the whole model or just
+         one level (the picker under it); Suggest cuts only cuts the level
+         that's too wide, where the cut is solid, so you don't get thin
+         slivers. A part thinner than 20 mm is flagged in the list. Split
+         and save parts
          saves "<name> - part 1.stl" and so on in the scan's folder, with
          pegs on the part below each cut and matching holes in the part
          above. Peg diameter, length and hole clearance are set there too.
          When you build, a shell piece too big for the printer is split the
          same way (SHELL_1A, SHELL_1B...), with pegs where the wall is thick
-         enough. Untick "Split shell pieces that don't fit the printer" on
+         enough. A cut through a curved wall can leave separate bits; each
+         one is joined back onto the part beside it when that still fits,
+         so every part prints in one piece. The same goes for a mold piece
+         that would come out in separate bits: a small bit joins the piece
+         next to it, a big one becomes a piece of its own. Untick "Split shell pieces that don't fit the printer" on
          the Settings tab to stop that.
        - Pour spout (Scan tab): set the Diameter and Height, pick Straight up
          or Out from the surface, then Place by clicking (click the model

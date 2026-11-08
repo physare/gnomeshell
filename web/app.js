@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.13.2"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.13.3"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -1779,19 +1779,46 @@ function drawPrinter() {
 function cutAxis(cut) { return cut.kind === "x" ? 0 : cut.kind === "y" ? 1 : 2; }
 // which split part each triangle of the model is in, numbered like the parts list (bottom first, then left to right)
 let splitPartCache = { key: null, parts: null };
+// the middle of each triangle of the model, kept while the model stays the same
+let splitCentCache = { key: null, c: null };
+function splitCentroids() {
+  if (splitCentCache.key === latexMesh.uuid + latexTri.n) return splitCentCache.c;
+  const pos = latexPos(), n = latexTri.n, C = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) for (let a = 0; a < 3; a++) C[i * 3 + a] = (pos[i * 9 + a] + pos[i * 9 + 3 + a] + pos[i * 9 + 6 + a]) / 3;
+  splitCentCache = { key: latexMesh.uuid + latexTri.n, c: C };
+  return C;
+}
+// level cuts, lowest first: they split the model into levels (0 = bottom)
+function splitLevels() { return SPLIT.cuts.filter((c) => cutAxis(c) === 2).map((c) => c.point[2]).sort((a, b) => a - b); }
+function bandOf(z, lv) { let b = 0; for (const h of lv) if (z >= h) b++; return b; }
+function bandName(b, lv) { return b === 0 ? "bottom level" : b === lv.length ? "top level" : `level ${b + 1}`; }
+function sideName(w, s) { const o = SPLIT.cuts[w]; if (!o) return ""; return `${cutAxis(o) === 0 ? (s > 0 ? "right" : "left") : (s > 0 ? "back" : "front")} of cut ${w + 1}`; }
 function splitPartOf() {
   if (!SPLIT.cuts.length || !latexMesh || !latexTri) return null;
-  const key = latexMesh.uuid + JSON.stringify(SPLIT.cuts.map((c) => [c.kind, c.point[cutAxis(c)]]));
+  const key = latexMesh.uuid + JSON.stringify(SPLIT.cuts.map((c) => [c.kind, c.point[cutAxis(c)], c.band, c.within]));
   if (splitPartCache.key === key) return splitPartCache.parts;
-  const pos = latexPos(), n = latexTri.n, keys = new Uint32Array(n), info = new Map();
-  const ax = SPLIT.cuts.map(cutAxis), at = SPLIT.cuts.map((c, j) => c.point[ax[j]]);
+  const C = splitCentroids(), n = latexTri.n, keys = new Uint32Array(n), info = new Map(), lv = splitLevels();
+  // level cuts first, right through; an upright cut can be kept to one level, or one side of another cut
+  const seq = SPLIT.cuts.map((_, j) => j).sort((a, b) => (cutAxis(SPLIT.cuts[a]) !== 2) - (cutAxis(SPLIT.cuts[b]) !== 2));
+  for (const j of seq) {
+    const cut = SPLIT.cuts[j], ax = cutAxis(cut), at = cut.point[ax], bit = 1 << j;
+    let ok = null;
+    if (ax !== 2 && ((cut.band != null && lv.length) || (cut.within || []).length)) {
+      const sum = new Map();
+      for (let i = 0; i < n; i++) { let r = sum.get(keys[i]); if (!r) sum.set(keys[i], (r = [0, 0, 0, 0])); r[0] += C[i * 3]; r[1] += C[i * 3 + 1]; r[2] += C[i * 3 + 2]; r[3]++; }
+      ok = new Map();
+      for (const [k, r] of sum) {
+        const m = [r[0] / r[3], r[1] / r[3], r[2] / r[3]];
+        let yes = !(cut.band != null && lv.length && bandOf(m[2], lv) !== +cut.band);
+        for (const [w, s] of cut.within || []) { const o = SPLIT.cuts[w]; if (o && (m[cutAxis(o)] >= o.point[cutAxis(o)]) !== (s > 0)) yes = false; }
+        ok.set(k, yes);
+      }
+    }
+    for (let i = 0; i < n; i++) if ((!ok || ok.get(keys[i])) && C[i * 3 + ax] < at) keys[i] |= bit;
+  }
   for (let i = 0; i < n; i++) {
-    const o = i * 9, p = [(pos[o] + pos[o + 3] + pos[o + 6]) / 3, (pos[o + 1] + pos[o + 4] + pos[o + 7]) / 3, (pos[o + 2] + pos[o + 5] + pos[o + 8]) / 3];
-    let k = 0;
-    for (let j = 0; j < ax.length; j++) if (p[ax[j]] < at[j]) k |= 1 << j;
-    keys[i] = k;
-    const r = info.get(k);
-    if (!r) info.set(k, { z: p[2], x: p[0] }); else { if (p[2] < r.z) r.z = p[2]; if (p[0] < r.x) r.x = p[0]; }
+    const k = keys[i], r = info.get(k), x = C[i * 3], z = C[i * 3 + 2];
+    if (!r) info.set(k, { z, x }); else { if (z < r.z) r.z = z; if (x < r.x) r.x = x; }
   }
   const order = [...info.entries()].sort((a, b) => (Math.round(a[1].z / 5) - Math.round(b[1].z / 5)) || (a[1].x - b[1].x)).map((e) => e[0]);
   const idx = new Map(order.map((k, i) => [k, i])), parts = new Uint16Array(n);
@@ -1801,9 +1828,10 @@ function splitPartOf() {
 }
 // a handle per split cut, beside the model, to drag the cut along its axis
 function splitHandlePos(cut) {
-  const c = S.scan.center, sz = (S.scan.size || S.scan.dims).map(Number), m = size() * 0.12, a = cutAxis(cut);
-  return a === 0 ? new V3(cut.point[0], c[1] - sz[1] / 2 - m, c[2] + sz[2] / 2) :
-    a === 1 ? new V3(c[0] + sz[0] / 2 + m, cut.point[1], c[2] + sz[2] / 2) :
+  const c = S.scan.center, sz = (S.scan.size || S.scan.dims).map(Number), m = size() * 0.12, a = cutAxis(cut), lv = splitLevels();
+  const top = cut.band != null && +cut.band < lv.length ? lv[+cut.band] : c[2] + sz[2] / 2;
+  return a === 0 ? new V3(cut.point[0], c[1] - sz[1] / 2 - m, top) :
+    a === 1 ? new V3(c[0] + sz[0] / 2 + m, cut.point[1], top) :
     new V3(c[0] + sz[0] / 2 + m, c[1] - sz[1] / 2 - m, cut.point[2]);
 }
 function splitHandleAt(e) {
@@ -1850,14 +1878,21 @@ function renderSplit() {
   $("#fitLine").innerHTML = `${printerName()}: ${v.join(" × ")} mm. ` + (over
     ? `<span class="bad">The model (${d.map((x) => Math.round(x)).join(" × ")} mm) is ${over} mm too big for one print.</span> Press Suggest cuts.`
     : `<span class="ok">The model fits in one piece.</span>`);
-  const c = S.scan.center, sz = (S.scan.size || S.scan.dims).map(Number);
+  const c = S.scan.center, sz = (S.scan.size || S.scan.dims).map(Number), lv = splitLevels();
   $("#splitCuts").innerHTML = SPLIT.cuts.map((cut, k) => {
     const a = cutAxis(cut), lo = Math.floor(c[a] - sz[a] / 2 - (a === 2 ? baseH() : 0)), hi = Math.ceil(c[a] + sz[a] / 2);
     const lab = cut.kind === "x" ? "upright, across" : cut.kind === "y" ? "upright, front-back" : "level";
-    return `<div class="split-cut" data-k="${k}"><span>Cut ${k + 1} · ${lab}</span><input type="range" min="${lo}" max="${hi}" step="1" value="${cut.point[a]}"><input type="number" class="mono" step="1" value="${cut.point[a]}"><button type="button" class="btn sm" title="Remove this cut">×</button></div>`;
+    let scope = "";
+    if (a !== 2 && (lv.length || (cut.within || []).length)) {
+      const w = (cut.within || []).length, b = cut.band != null && lv.length ? +cut.band : null;
+      const opts = [`<option value="all"${b == null && !w ? " selected" : ""}>Through the whole model</option>`,
+        ...lv.concat([0]).map((_, j) => `<option value="${j}"${b === j && !w ? " selected" : ""}>Through the ${bandName(j, lv)} only</option>`)];
+      if (w) opts.push(`<option value="w" selected>Through the ${b != null ? bandName(b, lv) : "model"}, ${cut.within.map(([q, s]) => sideName(q, s)).join(" and ")}</option>`);
+      scope = `<select class="split-scope" title="Which part of the model this cut goes through">${opts.join("")}</select>`;
+    }
+    return `<div class="split-cut" data-k="${k}"><span>Cut ${k + 1} · ${lab}</span><input type="range" min="${lo}" max="${hi}" step="1" value="${cut.point[a]}"><input type="number" class="mono" step="1" value="${cut.point[a]}"><button type="button" class="btn sm" title="Remove this cut">×</button>${scope}</div>`;
   }).join("");
-  $("#splitParts").innerHTML = SPLIT.parts.map((p, k) => `<div>Part ${k + 1}: <span class="mono">${p.dims.map((x) => Math.round(x)).join(" × ")} mm</span> · <span class="${p.fits ? "ok" : "bad"}">${p.fits ? "fits" : `${p.over} mm too big`}</span>${p.file ? ` · ${p.file}` : ""}</div>`).join("");
-  $("#splitGo").disabled = !SPLIT.cuts.length;
+  renderSplitParts();
 }
 let splitT = null;
 function splitChanged() {
@@ -1871,11 +1906,19 @@ function splitChanged() {
   }, 350);
 }
 function renderSplitParts() {
-  $("#splitParts").innerHTML = SPLIT.parts.map((p, k) => `<div><i class="sw" style="background:${pieceColor(k)}"></i> Part ${k + 1}: <span class="mono">${p.dims.map((x) => Math.round(x)).join(" × ")} mm</span> · <span class="${p.fits ? "ok" : "bad"}">${p.fits ? "fits" : `${p.over} mm too big`}</span>${p.file ? ` · ${p.file}` : ""}</div>`).join("");
+  $("#splitParts").innerHTML = SPLIT.parts.map((p, k) => `<div><i class="sw" style="background:${pieceColor(k)}"></i> Part ${k + 1}: <span class="mono">${p.dims.map((x) => Math.round(x)).join(" × ")} mm</span> · <span class="${p.fits ? "ok" : "bad"}">${p.fits ? "fits" : `${p.over} mm too big`}</span>${Math.min(...p.dims) < 20 ? ` · <span class="bad">a thin sliver: move or remove a cut</span>` : ""}${p.file ? ` · ${p.file}` : ""}</div>`).join("");
   $("#splitGo").disabled = !SPLIT.cuts.length;
 }
 $("#splitCuts").addEventListener("input", (e) => {
   const row = e.target.closest(".split-cut"); if (!row) return;
+  if (e.target.matches("select")) {
+    const cut = SPLIT.cuts[+row.dataset.k], v = e.target.value;
+    if (v === "w") return;
+    delete cut.within;
+    if (v === "all") delete cut.band; else cut.band = +v;
+    renderSplit(); splitChanged();
+    return;
+  }
   const cut = SPLIT.cuts[+row.dataset.k], a = cutAxis(cut), val = +e.target.value;
   if (!Number.isFinite(val)) return;
   cut.point[a] = val;
@@ -1884,13 +1927,41 @@ $("#splitCuts").addEventListener("input", (e) => {
 });
 $("#splitCuts").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
-  SPLIT.cuts.splice(+b.closest(".split-cut").dataset.k, 1); renderSplit(); splitChanged();
+  const k = +b.closest(".split-cut").dataset.k;
+  SPLIT.cuts.splice(k, 1);
+  const nb = splitLevels().length;
+  for (const c of SPLIT.cuts) {
+    if (c.within) { c.within = c.within.filter(([w]) => w !== k).map(([w, s]) => [w > k ? w - 1 : w, s]); if (!c.within.length) delete c.within; }
+    if (c.band != null) { if (!nb) delete c.band; else if (c.band > nb) c.band = nb; }
+  }
+  renderSplit(); splitChanged();
 });
 function addSplitCut(kind) {
   if (!S.scan) return;
   const c = S.scan.center.map((v) => Math.round(v));
   const normal = kind === "x" ? [1, 0, 0] : kind === "y" ? [0, 1, 0] : [0, 0, 1];
-  SPLIT.cuts.push({ point: [kind === "x" ? c[0] : 0, kind === "y" ? c[1] : 0, kind === "level" ? c[2] : 0], normal, kind });
+  const cut = { point: [kind === "x" ? c[0] : 0, kind === "y" ? c[1] : 0, kind === "level" ? c[2] : 0], normal, kind };
+  const lv = splitLevels(), a = cutAxis(cut);
+  if (a !== 2 && lv.length && latexMesh && latexTri) {
+    // an upright cut goes through the widest level only, across its middle
+    const C = splitCentroids(), ext = lv.concat([0]).map(() => [Infinity, -Infinity]);
+    for (let i = 0; i < latexTri.n; i += 3) { const e = ext[bandOf(C[i * 3 + 2], lv)], v = C[i * 3 + a]; if (v < e[0]) e[0] = v; if (v > e[1]) e[1] = v; }
+    let best = 0;
+    ext.forEach((e, j) => { if (e[1] - e[0] > ext[best][1] - ext[best][0]) best = j; });
+    cut.band = best;
+  }
+  if (a !== 2 && latexMesh && latexTri) {
+    // in the middle of the widest gap between the cuts already there, so it doesn't leave a sliver
+    const C = splitCentroids(), lv2 = splitLevels();
+    let e0 = Infinity, e1 = -Infinity;
+    for (let i = 0; i < latexTri.n; i += 3) { if (cut.band != null && bandOf(C[i * 3 + 2], lv2) !== cut.band) continue; const v = C[i * 3 + a]; if (v < e0) e0 = v; if (v > e1) e1 = v; }
+    const at = SPLIT.cuts.filter((o) => cutAxis(o) === a && (o.band == null || cut.band == null || +o.band === cut.band)).map((o) => o.point[a]).filter((v) => v > e0 && v < e1);
+    const edges = [e0, ...at.sort((x, y) => x - y), e1];
+    let g = 0;
+    for (let j = 1; j < edges.length - 1; j++) if (edges[j + 1] - edges[j] > edges[g + 1] - edges[g]) g = j;
+    if (Number.isFinite(e0)) cut.point[a] = Math.round((edges[g] + edges[g + 1]) / 2);
+  }
+  SPLIT.cuts.push(cut);
   renderSplit(); splitChanged();
 }
 $("#splitAdd").onclick = () => addSplitCut("level");
@@ -2513,10 +2584,13 @@ async function showBuild(res) {
     <dt>Cord notches</dt><dd>${res.notches}</dd>
     <dt>Alignment bumps</dt><dd>${res.bumps || "none"}</dd>` : `<dt>Box</dt><dd>${d.join(" × ")} mm</dd>
     <dt>Bungee channels</dt><dd>${res.channels}${res.skipped_channels ? ` (${res.skipped_channels} skipped at a cut)` : ""}</dd>`) + `
-    <dt>Fits your printer</dt><dd style="color:${res.fits_plate ? "var(--ok)" : "#f08a70"}">${res.fits_plate ? "yes" : (res.split_pieces || []).length ? "each part does" : "no"}</dd>` + ((res.plates || []).length ? `
+    <dt>Fits your printer</dt><dd style="color:${res.fits_plate || (res.split_pieces || []).length ? "var(--ok)" : "#f08a70"}">${res.fits_plate ? "yes" : (res.split_pieces || []).length ? "each part does" : "no"}</dd>` + ((res.plates || []).length ? `
     <dt>Plates</dt><dd>${res.plates.length}${res.plates.length > 1 ? ` · saved as ${res.plates.map((p) => p.file).join(", ")}` : " · shell.3mf"}</dd>` : "") + ((res.split_pieces || []).length ? `
-    <dt>Split to fit</dt><dd>${res.split_pieces.map((s) => `${s.piece.replace("SHELL_", "piece ")} into ${s.parts}, ${s.pegs ? `${s.pegs} pegs` : "too thin for pegs, glue them"}`).join("; ")}</dd>` : "") + `
-    <dt>Pour collar</dt><dd>${+S.settings.pour_extend_mm ? S.settings.pour_extend_mm + " mm" : "off"}</dd>` + (res.insert ? `
+    <dt>Split to fit</dt><dd>${res.split_pieces.every((s) => !s.pegs)
+      ? `${res.split_pieces.map((s) => `${s.piece.replace("SHELL_", "piece ")} into ${s.parts}`).join(", ")}. Too thin for pegs: glue the parts together.`
+      : res.split_pieces.map((s) => `${s.piece.replace("SHELL_", "piece ")} into ${s.parts}, ${s.pegs ? `${s.pegs} pegs` : "glue (too thin for pegs)"}`).join("; ")}</dd>` : "") + `
+    <dt>Pour collar</dt><dd>${+S.settings.pour_extend_mm ? S.settings.pour_extend_mm + " mm" : "off"}</dd>` + (res.bits_joined || res.bits_own_piece ? `
+    <dt>Stray bits</dt><dd>${[res.bits_joined ? `${res.bits_joined} joined onto the piece beside ${res.bits_joined === 1 ? "it" : "them"}` : "", res.bits_own_piece ? `${res.bits_own_piece} big enough to be ${res.bits_own_piece === 1 ? "a piece of its own" : "pieces of their own"}` : ""].filter(Boolean).join(", ")}</dd>` : "") + (res.insert ? `
     <dt>Thinnest concrete</dt><dd style="color:${res.insert.thinnest_mm >= (S.insert.least || 20) ? "var(--ok)" : "#f08a70"}">${res.insert.thinnest_mm} mm</dd>
     <dt>Silicone to mix</dt><dd>about ${res.insert.silicone_l} L</dd>
     <dt>Holder</dt><dd>${res.insert.holder_mm.join(" × ")} mm</dd>
@@ -3329,7 +3403,7 @@ $("#insOnly").onclick = () => {
 };
 
 // for testing
-window.__ms = { showTab, curTab, sizerAt, drawSizer, sizerOn, baseH, setBaseH, latexDistance, INS, S, insCentre: (T) => insCentreOnOpening(T), insFit, insAutoFit, insHandleAt, setInsView, insViewOn, insThinnest, insLayout, drawInsert, insSpec, loadRecent, frameGroup, slicePlans, startBuild, pickAt, pieceSpec, refresh, compute, splitPieces, splitNormal, pickAllPieces, mirrorCuts, mirrorPlane, applyLayout, layoutNow, labels: () => labels, renderCuts, camera, groups, removeCut, deleteSegs, deleteCuts, mergePieces, optimize, undo, redo, setMode, selectSeg, selectPiece, selectCut, H, meshes, handle, gizmoT, gizmoR, onHandleMove };
+window.__ms = { showTab, splitPartOf, SPLIT, curTab, sizerAt, drawSizer, sizerOn, baseH, setBaseH, latexDistance, INS, S, insCentre: (T) => insCentreOnOpening(T), insFit, insAutoFit, insHandleAt, setInsView, insViewOn, insThinnest, insLayout, drawInsert, insSpec, loadRecent, frameGroup, slicePlans, startBuild, pickAt, pieceSpec, refresh, compute, splitPieces, splitNormal, pickAllPieces, mirrorCuts, mirrorPlane, applyLayout, layoutNow, labels: () => labels, renderCuts, camera, groups, removeCut, deleteSegs, deleteCuts, mergePieces, optimize, undo, redo, setMode, selectSeg, selectPiece, selectCut, H, meshes, handle, gizmoT, gizmoR, onHandleMove };
 
 // ------------------------------------------------------------ tooltips and panels
 // Hover anything with a title (or a ? icon) for a tooltip; long help lives there, not in the panel.
