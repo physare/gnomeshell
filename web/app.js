@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.13.1"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.13.2"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -351,16 +351,37 @@ function refresh(o = {}) {
   cutTags(T);
   estimate();
   applyInsView();
+  scanTabQuiet();
+}
+// the Scan tab is about the model itself: the shell's cuts, pieces, arrows and slice line wait on the Cuts tab
+function scanTabQuiet() {
+  const quiet = curTab() === "scan" && S.step === "cut";
+  labelBox.hidden = quiet;
+  if (!quiet) return;
+  groups.planes.visible = groups.regions.visible = groups.arrows.visible = groups.slicePlan.visible = false;
+  detachHandle();
 }
 let rafT = null;
 function refreshSoon(o) { if (rafT) return; rafT = requestAnimationFrame(() => { rafT = null; refresh(o); }); }
 
 function paint(T) {
   const colors = latexMesh.geometry.attributes.color.array;
+  const parts = S.step === "cut" && curTab() === "scan" && !insViewOn() ? splitPartOf() : null;
+  if (parts) {
+    const pc = PIECE_COLORS.map((h) => new THREE.Color(h).lerp(COL.latex, 0.2));
+    for (let i = 0; i < latexTri.n; i++) {
+      const col = pc[parts[i] % pc.length];
+      colors[i * 9] = colors[i * 9 + 3] = colors[i * 9 + 6] = col.r;
+      colors[i * 9 + 1] = colors[i * 9 + 4] = colors[i * 9 + 7] = col.g;
+      colors[i * 9 + 2] = colors[i * 9 + 5] = colors[i * 9 + 8] = col.b;
+    }
+    latexMesh.geometry.attributes.color.needsUpdate = true;
+    return;
+  }
   const show = $("#tOver").checked && S.cuts.length && !insViewOn();
   const base = insViewOn() ? COL.ghost : COL.latex;
   // each piece in its own colour on the model; with some picked, the rest fade
-  const byPiece = S.step === "cut" && $("#tPieces").checked && S.cuts.length && !insViewOn() && T.pieces.length > 1;
+  const byPiece = S.step === "cut" && curTab() !== "scan" && $("#tPieces").checked && S.cuts.length && !insViewOn() && T.pieces.length > 1;
   const anySel = S.selPieces.size > 0;
   const pc = byPiece ? T.pieces.map((P, k) => {
     const c = new THREE.Color(pieceColor(k)).lerp(COL.latex, 0.2);
@@ -630,7 +651,7 @@ function highlight() {
   for (const [id, o] of meshes.pieces) {
     const sel = S.selPieces.has(id), hov = S.hover && S.hover.kind === "piece" && S.hover.key === id;
     o.m.material.opacity = sel ? 0.1 : hov ? 0.06 : 0;
-    o.e.material.opacity = sel ? 0.7 : hov ? 0.45 : 0;
+    o.e.material.opacity = sel ? 0.85 : hov ? 0.6 : anyPiece ? 0.15 : 0.35;
   }
   if (anyPiece) for (const [key, o] of meshes.segs) {
     if (S.selSegs.has(key) || o.cut === activeCut || S.selCuts.has(o.cut)) continue;
@@ -1214,6 +1235,7 @@ function setMode(m) {
 let drag = null, down = null, hoverT = null;
 canvas.addEventListener("pointerdown", (e) => {
   down = null; closeMenu();
+  if (SEAM.picking || WEB.picking || splitHandleAt(e)) return; // their own click handlers deal with it
   const sh = e.button === 0 && S.step === "cut" ? sizerAt(e) : null;
   if (sh) { sizerStart(e, sh); e.stopImmediatePropagation(); return; }
   const ih = e.button === 0 && S.step === "cut" ? insHandleAt(e) : null;
@@ -1733,6 +1755,7 @@ function modelDims() { const sz = (S.scan.size || S.scan.dims).map(Number); retu
 function drawPrinter() {
   const g = groups.printer;
   g.clear();
+  if (latexMesh && latexTri) paint(S.T || { pieces: [] }); // split parts in colour on the Scan tab, pieces elsewhere
   g.visible = !!(S.step === "cut" && S.scan && curTab() === "scan" && !insViewOn() && $("#showPrinter").checked);
   if (!g.visible) return;
   const [W, D, H] = printerVol(), c = S.scan.center, sz = (S.scan.size || S.scan.dims).map(Number);
@@ -1740,19 +1763,86 @@ function drawPrinter() {
   const ok = fitsVol(modelDims(), [W, D, H]);
   const box = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(W, D, H)), new THREE.LineBasicMaterial({ color: ok ? "#7fc89a" : "#f08a70", transparent: true, opacity: 0.75 }));
   box.position.set(c[0], c[1], z0 + H / 2); g.add(box);
-  const big = Math.max(...sz) * 1.25;
-  for (const cut of SPLIT.cuts) {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(big, big), new THREE.MeshBasicMaterial({ color: "#f0a040", transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }));
-    const e = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(big, big)), new THREE.LineBasicMaterial({ color: "#f0a040" }));
-    for (const o of [m, e]) {
-      if (cut.kind === "x") { o.rotation.y = Math.PI / 2; o.position.set(cut.point[0], c[1], c[2]); }
-      else if (cut.kind === "y") { o.rotation.x = Math.PI / 2; o.position.set(c[0], cut.point[1], c[2]); }
-      else o.position.set(c[0], c[1], cut.point[2]);
-      g.add(o);
-    }
-  }
+  SPLIT.cuts.forEach((cut, k) => {
+    const p = splitHandlePos(cut), r = Math.max(2.5, size() * 0.022), a = cutAxis(cut);
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), new THREE.MeshBasicMaterial({ color: "#f0a040", depthTest: false }));
+    ball.position.copy(p); ball.renderOrder = 12; ball.userData.splitCut = k;
+    // a short line along the way it moves
+    const d = new V3(a === 0 ? 1 : 0, a === 1 ? 1 : 0, a === 2 ? 1 : 0).multiplyScalar(r * 3);
+    const line = new THREE.LineSegments(lineGeometry([p.clone().sub(d), p.clone().add(d)]), new THREE.LineBasicMaterial({ color: "#f0a040", depthTest: false, transparent: true, opacity: 0.8 }));
+    line.renderOrder = 12;
+    const tag = textSprite(String(k + 1), r * 1.6); tag.position.copy(p).add(new V3(0, 0, r * 2.2));
+    g.add(ball, line, tag);
+  });
+  $("#splitHint").hidden = !SPLIT.cuts.length;
 }
 function cutAxis(cut) { return cut.kind === "x" ? 0 : cut.kind === "y" ? 1 : 2; }
+// which split part each triangle of the model is in, numbered like the parts list (bottom first, then left to right)
+let splitPartCache = { key: null, parts: null };
+function splitPartOf() {
+  if (!SPLIT.cuts.length || !latexMesh || !latexTri) return null;
+  const key = latexMesh.uuid + JSON.stringify(SPLIT.cuts.map((c) => [c.kind, c.point[cutAxis(c)]]));
+  if (splitPartCache.key === key) return splitPartCache.parts;
+  const pos = latexPos(), n = latexTri.n, keys = new Uint32Array(n), info = new Map();
+  const ax = SPLIT.cuts.map(cutAxis), at = SPLIT.cuts.map((c, j) => c.point[ax[j]]);
+  for (let i = 0; i < n; i++) {
+    const o = i * 9, p = [(pos[o] + pos[o + 3] + pos[o + 6]) / 3, (pos[o + 1] + pos[o + 4] + pos[o + 7]) / 3, (pos[o + 2] + pos[o + 5] + pos[o + 8]) / 3];
+    let k = 0;
+    for (let j = 0; j < ax.length; j++) if (p[ax[j]] < at[j]) k |= 1 << j;
+    keys[i] = k;
+    const r = info.get(k);
+    if (!r) info.set(k, { z: p[2], x: p[0] }); else { if (p[2] < r.z) r.z = p[2]; if (p[0] < r.x) r.x = p[0]; }
+  }
+  const order = [...info.entries()].sort((a, b) => (Math.round(a[1].z / 5) - Math.round(b[1].z / 5)) || (a[1].x - b[1].x)).map((e) => e[0]);
+  const idx = new Map(order.map((k, i) => [k, i])), parts = new Uint16Array(n);
+  for (let i = 0; i < n; i++) parts[i] = idx.get(keys[i]);
+  splitPartCache = { key, parts };
+  return parts;
+}
+// a handle per split cut, beside the model, to drag the cut along its axis
+function splitHandlePos(cut) {
+  const c = S.scan.center, sz = (S.scan.size || S.scan.dims).map(Number), m = size() * 0.12, a = cutAxis(cut);
+  return a === 0 ? new V3(cut.point[0], c[1] - sz[1] / 2 - m, c[2] + sz[2] / 2) :
+    a === 1 ? new V3(c[0] + sz[0] / 2 + m, cut.point[1], c[2] + sz[2] / 2) :
+    new V3(c[0] + sz[0] / 2 + m, c[1] - sz[1] / 2 - m, cut.point[2]);
+}
+function splitHandleAt(e) {
+  if (S.step !== "cut" || curTab() !== "scan" || !groups.printer.visible || !SPLIT.cuts.length || e.button !== 0) return null;
+  setRay(e);
+  const hit = ray.intersectObjects(groups.printer.children.filter((o) => o.userData.splitCut != null), false)[0];
+  return hit ? hit.object.userData.splitCut : null;
+}
+let splitDrag = null;
+canvas.addEventListener("pointerdown", (e) => {
+  const k = splitHandleAt(e); if (k == null) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  const cut = SPLIT.cuts[k], a = cutAxis(cut), p = splitHandlePos(cut);
+  splitDrag = { k, a, origin: p.clone(), dir: new V3(a === 0 ? 1 : 0, a === 1 ? 1 : 0, a === 2 ? 1 : 0) };
+  orbit.enabled = false; canvas.setPointerCapture(e.pointerId);
+}, true);
+canvas.addEventListener("pointermove", (e) => {
+  if (!splitDrag) return;
+  e.stopImmediatePropagation();
+  setRay(e);
+  // the point on the cut's axis nearest the mouse ray
+  const { origin: o, dir: d } = splitDrag, r = ray.ray, w = o.clone().sub(r.origin);
+  const b = d.dot(r.direction), den = 1 - b * b; if (den < 1e-6) return;
+  const t = (b * r.direction.dot(w) - d.dot(w)) / den;
+  const c = S.scan.center, sz = (S.scan.size || S.scan.dims).map(Number), a = splitDrag.a;
+  const lo = c[a] - sz[a] / 2 - (a === 2 ? baseH() : 0) + 1, hi = c[a] + sz[a] / 2 - 1;
+  const v = Math.round(Math.max(lo, Math.min(hi, o.getComponent(a) + t)));
+  if (SPLIT.cuts[splitDrag.k].point[a] === v) return;
+  SPLIT.cuts[splitDrag.k].point[a] = v;
+  const row = $$("#splitCuts .split-cut")[splitDrag.k];
+  if (row) row.querySelectorAll("input").forEach((el) => { el.value = v; });
+  if (!splitDrag.raf) splitDrag.raf = requestAnimationFrame(() => { if (splitDrag) splitDrag.raf = null; drawPrinter(); if (S.T) paint(S.T); });
+}, true);
+canvas.addEventListener("pointerup", (e) => {
+  if (!splitDrag) return;
+  e.stopImmediatePropagation();
+  splitDrag = null; orbit.enabled = true;
+  splitChanged();
+}, true);
 function renderSplit() {
   if (!S.scan) return;
   const v = printerVol(), d = modelDims(), over = overBy(d, v);
@@ -1781,7 +1871,7 @@ function splitChanged() {
   }, 350);
 }
 function renderSplitParts() {
-  $("#splitParts").innerHTML = SPLIT.parts.map((p, k) => `<div>Part ${k + 1}: <span class="mono">${p.dims.map((x) => Math.round(x)).join(" × ")} mm</span> · <span class="${p.fits ? "ok" : "bad"}">${p.fits ? "fits" : `${p.over} mm too big`}</span>${p.file ? ` · ${p.file}` : ""}</div>`).join("");
+  $("#splitParts").innerHTML = SPLIT.parts.map((p, k) => `<div><i class="sw" style="background:${pieceColor(k)}"></i> Part ${k + 1}: <span class="mono">${p.dims.map((x) => Math.round(x)).join(" × ")} mm</span> · <span class="${p.fits ? "ok" : "bad"}">${p.fits ? "fits" : `${p.over} mm too big`}</span>${p.file ? ` · ${p.file}` : ""}</div>`).join("");
   $("#splitGo").disabled = !SPLIT.cuts.length;
 }
 $("#splitCuts").addEventListener("input", (e) => {
@@ -1796,12 +1886,16 @@ $("#splitCuts").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
   SPLIT.cuts.splice(+b.closest(".split-cut").dataset.k, 1); renderSplit(); splitChanged();
 });
-$("#splitAdd").onclick = () => {
+function addSplitCut(kind) {
   if (!S.scan) return;
-  const c = S.scan.center, sz = (S.scan.size || S.scan.dims).map(Number);
-  SPLIT.cuts.push({ point: [0, 0, Math.round(c[2])], normal: [0, 0, 1], kind: "level" });
+  const c = S.scan.center.map((v) => Math.round(v));
+  const normal = kind === "x" ? [1, 0, 0] : kind === "y" ? [0, 1, 0] : [0, 0, 1];
+  SPLIT.cuts.push({ point: [kind === "x" ? c[0] : 0, kind === "y" ? c[1] : 0, kind === "level" ? c[2] : 0], normal, kind });
   renderSplit(); splitChanged();
-};
+}
+$("#splitAdd").onclick = () => addSplitCut("level");
+$("#splitAddX").onclick = () => addSplitCut("x");
+$("#splitAddY").onclick = () => addSplitCut("y");
 $("#splitSuggest").onclick = () => withBusy("Finding cuts that fit your printer", async () => {
   const r = await api("/api/split_plan", { suggest: true });
   SPLIT.cuts = r.cuts; SPLIT.parts = r.parts; renderSplit(); drawPrinter();
@@ -2043,7 +2137,8 @@ function renderSeam() {
   $("#seamSave").disabled = $("#seamClear").disabled = !SEAM.cards.length;
   $("#seamSave").textContent = SEAM.cards.length > 1 ? `Save ${SEAM.cards.length} seam card STLs` : "Save seam card STL";
 }
-function drawSeamVis() { groups.seam.visible = !!(S.scan && curTab() === "scan" && S.step === "cut"); }
+function drawSeamVis() { groups.seam.visible = !!(S.scan && S.step === "cut" && $("#tSeam").checked && !insViewOn()); }
+$("#tSeam").onchange = () => drawSeamVis();
 function updateSeam() {
   clearTimeout(seamT);
   seamT = setTimeout(async () => {
@@ -2229,6 +2324,7 @@ function showTab(t) {
   $$("#ptabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
   sc.scrollTop = tabScroll[t] || 0;
   drawSizer();
+  if (S.T && (t === "scan" || was === "scan")) refresh({ keepHandle: true });
 }
 $$("#ptabs [data-tab]").forEach((b) => b.onclick = () => showTab(b.dataset.tab));
 function paintTabs() {

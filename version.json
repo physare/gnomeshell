@@ -1,4 +1,4 @@
 {
-  "version": "0.13.1",
-  "notes": "- A loading screen shows the moment you click the GnomeShell icon, while Blender starts, then turns into the app."
+  "version": "0.13.2",
+  "notes": "- Seam cards now show as soon as you place them, with a Seam cards switch at the top to hide or show them.\n- Piece box outlines show all the time again, not only on hover.\n- Fit your printer: each part shows in its own colour instead of lines, and each cut has a numbered handle you drag to move it. New + Upright, across and + Upright, front-back buttons."
 }

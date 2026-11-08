@@ -92,8 +92,11 @@ USE
          Elegoo, or Custom with width, depth and height). Its space shows as
          a box round the model, red when the model is too big. Suggest cuts
          finds level cuts (and upright ones if it's too wide) so every part
-         fits, at spots where the cut is solid with room for pegs. Drag a
-         cut's slider to move it, + Level cut adds one. Split and save parts
+         fits, at spots where the cut is solid with room for pegs. Each part
+         shows in its own colour on the model, and each cut has a numbered
+         orange handle: drag it to move that cut, or use its slider or type
+         a number. + Level cut, + Upright, across and + Upright, front-back
+         add a cut. Split and save parts
          saves "<name> - part 1.stl" and so on in the scan's folder, with
          pegs on the part below each cut and matching holes in the part
          above. Peg diameter, length and hole clearance are set there too.
@@ -116,7 +119,8 @@ USE
          the plainest side. Each card's top has a slider. Sticks out (50 mm),
          Thickness, Gap to model (0 fits exactly) and a Stiff edge along the
          outer edge are settings. Save seam card STL saves each card laid
-         flat as "<name> - seam card.stl" in the scan's folder.
+         flat as "<name> - seam card.stl" in the scan's folder. Cards show
+         in the view; untick Seam cards at the top to hide them.
        - Gap webs (Scan tab): a thin flat sheet across a gap that's closed
          all round, like between the legs or an arm on the hip, so the
          latex can be pulled out and the web punched out of the concrete.

@@ -84,6 +84,7 @@
         <label for="tPieces"><input id="tPieces" type="checkbox" checked> Pieces</label>
         <label for="tPour"><input id="tPour" type="checkbox" checked> Pour collar</label>
         <label for="tSlices"><input id="tSlices" type="checkbox" checked> Test slices</label>
+        <label for="tSeam"><input id="tSeam" type="checkbox" checked> Seam cards</label>
       </div>
       <div class="toolbar tl" id="doneTools" hidden>
         <button type="button" data-show="shell" class="on">Shell</button>
@@ -291,7 +292,10 @@
               <div class="btn-grid">
                 <button type="button" class="btn" id="splitSuggest">Suggest cuts</button>
                 <button type="button" class="btn" id="splitAdd">+ Level cut</button>
+                <button type="button" class="btn" id="splitAddX">+ Upright, across</button>
+                <button type="button" class="btn" id="splitAddY">+ Upright, front–back</button>
               </div>
+              <p class="small muted" id="splitHint" hidden>Each part shows in its own colour. Drag a numbered handle in the view, or a slider, to move a cut.</p>
               <div id="splitCuts"></div>
               <div class="fields">
                 <label for="peg_d_mm">Peg diameter (mm)<input id="peg_d_mm" data-set type="number" step="0.5" min="2" max="30"></label>
