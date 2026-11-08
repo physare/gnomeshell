@@ -64,7 +64,7 @@ input[type=range] { accent-color: var(--latex); }
 .toolbar button { padding: 8px 12px; border-radius: 7px; border: 0; background: transparent; color: var(--muted); }
 .toolbar button:hover, .toolbar button.on { background: #2f3438; color: var(--text); }
 .toolbar label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.toolbar input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--latex); }
+.toolbar input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--latex); flex: none; }
 .legend { position: absolute; left: 16px; bottom: 16px; right: 16px; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; padding: 10px 14px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); font-size: 13px; color: #c5cacd; width: fit-content; max-width: calc(100% - 32px); }
 .legend span { display: flex; align-items: center; gap: 8px; }
 .legend .hint { color: var(--faint); }
@@ -408,3 +408,38 @@ h2 { font-size: 11px; margin-top: 4px; }
 .units-row > span { color: var(--muted); font-size: 13px; }
 .split-cut .split-scope { grid-column: 1 / -1; width: 100%; height: 26px; padding: 3px 8px; border-radius: 4px; background: var(--field); border: 1px solid var(--field-line); font-size: 12px; margin-top: -2px; }
 .split-cut .split-scope:hover { border-color: #4a5157; }
+
+/* 0.13.5: audit fixes */
+/* every checkbox in the panel in the app's own style */
+.check input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--latex); flex: none; }
+label.check { min-height: 24px; }
+/* small counts under the panel tabs, readable (4.8:1) */
+.ptabs .n { color: #9aa1a6; }
+/* ? icons: a visible focus ring, and a 24 px target round the 16 px circle */
+.help { position: relative; }
+.help::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; }
+.help:focus-visible { outline: 2px solid var(--latex); outline-offset: 2px; }
+.drop:focus-visible { outline: 2px solid var(--latex); outline-offset: -8px; border-radius: 16px; }
+/* the Show menu over the view */
+.toolbar.show-menu { display: block; padding: 0; }
+.show-menu summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 8px 14px; cursor: pointer; color: var(--text); border-radius: 10px; }
+.show-menu summary::-webkit-details-marker { display: none; }
+.show-menu summary:hover { background: #2f3438; }
+.show-menu[open] summary svg { transform: rotate(180deg); }
+.show-list { display: flex; flex-direction: column; gap: 4px; padding: 2px 8px 10px; }
+.show-list label { min-height: 30px; padding: 0 6px; border-radius: 6px; }
+.show-list label:hover { background: #2f3438; }
+/* while the engine works, the side panel waits too */
+body:has(#busy:not([hidden])) .panel { opacity: 0.55; pointer-events: none; transition: opacity 0.2s; }
+/* the legend keeps to one line; its tips show when you point at it */
+@media (max-width: 1439px) { .legend .hint { display: none; } .legend:hover .hint { display: flex; } }
+/* narrow windows and 200% zoom */
+.step { white-space: nowrap; }
+@media (max-width: 1100px) { .meta { display: none; } .steps { margin-left: 0; } .top { gap: 12px; } }
+@media (max-width: 900px) {
+  .brand span, .file { display: none; }
+  .panel { width: min(400px, 46vw); }
+  .legend { display: none; }
+  .scroll { padding: 16px 14px; }
+  .ptabs { margin: 10px 12px 0; }
+}

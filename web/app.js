@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.13.4"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.13.5"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -415,6 +415,7 @@ function meter(T) {
     dEl.textContent = `${down ? "▼" : "▲"} ${Math.abs(pct - base).toFixed(1)} from ${base.toFixed(1)}%`;
     dEl.className = "hud-d mono " + (down ? "better" : "worse");
   } else { dEl.textContent = ""; dEl.className = "hud-d mono"; }
+  $("#gl").setAttribute("aria-label", `3D view of ${S.scan?.name || "the scan"}${S.cuts.length ? `, ${T.pieces.length} pieces, ${pct.toFixed(1)}% overhang` : ""}`);
   $("#hudSub").textContent = !S.cuts.length ? "Add a cut to see it" :
     `${T.pieces.length} pieces${T.locked.length ? ` · ${T.locked.length} stuck` : ""}`;
   let worst = -1; badBy.forEach((b, i) => { if (worst < 0 || b > badBy[worst]) worst = i; });
@@ -427,7 +428,7 @@ function meter(T) {
   const w = $("#lockWarn");
   if (T.locked.length) {
     w.hidden = false;
-    w.textContent = `Pieces ${T.locked.map((i) => i + 1).join(", ")} hold each other in: each would push into another as it comes off. Drag one of their arrows so it pulls away from its neighbours.`;
+    w.textContent = `Pieces ${T.locked.map((i) => i + 1).join(", ")} hold each other in: each would push into another as it comes off. Drag one of their arrows so it pulls away from its neighbors.`;
   } else w.hidden = true;
 }
 
@@ -1417,7 +1418,7 @@ addEventListener("keydown", (e) => {
     e.preventDefault();
     if (S.selSegs.size) deleteSegs(new Set(S.selSegs));
     else if (S.selPieces.size > 1) mergePieces([...S.selPieces]);
-    else if (S.selPieces.size === 1) toast("To join this piece to a neighbour, Shift-click both and press Delete, or pick Lines and delete the line between them.");
+    else if (S.selPieces.size === 1) toast("To join this piece to a neighbor, Shift-click both and press Delete, or pick Lines and delete the line between them.");
     else if (S.selCuts.size) deleteCuts([...S.selCuts]);
     else if (S.active != null) deleteCuts([S.active]);
     return;
@@ -1455,7 +1456,7 @@ function badNumber(el) {
 function fillSettings() {
   SET_FIELDS.forEach((el) => {
     if (S.settings[el.id] === undefined) return;
-    if (el.type === "checkbox") el.checked = !!S.settings[el.id]; else el.value = S.settings[el.id];
+    if (el.type === "checkbox") el.checked = !!S.settings[el.id]; else el.value = "pct" in el.dataset ? Math.round(S.settings[el.id] * 100) : S.settings[el.id];
   });
   $("#pair_gap_mm").disabled = !S.settings.channel_pairs;
   $$("#sliceStyle button").forEach((b) => b.classList.toggle("on", b.dataset.style === S.settings.test_slice_style));
@@ -1495,11 +1496,12 @@ function fillSettings() {
 SET_FIELDS.forEach((el) => el.addEventListener("change", () => {
   const bad = badNumber(el);
   if (bad) {
-    toast(`${bad} Kept ${S.settings[el.id]}.`);
-    el.value = S.settings[el.id]; el.classList.add("bad"); setTimeout(() => el.classList.remove("bad"), 2500);
+    const was = "pct" in el.dataset ? Math.round(S.settings[el.id] * 100) : S.settings[el.id];
+    toast(`${bad} Kept ${was}.`);
+    el.value = was; el.classList.add("bad"); setTimeout(() => el.classList.remove("bad"), 2500);
     return;
   }
-  S.settings[el.id] = el.type === "checkbox" ? el.checked : el.type === "number" ? +el.value : el.value;
+  S.settings[el.id] = el.type === "checkbox" ? el.checked : el.type === "number" ? +el.value / ("pct" in el.dataset ? 100 : 1) : el.value;
   saveSettings(); estimate(); fillSettings();
   if (["draft_deg", "wall_mm", "bottom_trim_mm", "test_slice_mm", "test_slice_at", "hole_d_mm", "holes_per_corner", "channel_pairs", "pair_gap_mm"].includes(el.id)) refresh();
 }));
@@ -1627,6 +1629,7 @@ async function showScan(info, keepCuts, restore) {
     `Repair couldn't close every hole in this scan (${info.open_edges} open edges left). Fix it in your scan software, then load it again. The shell can't be built until then.` :
     `This scan has holes in its surface (${info.open_edges} open edges). The shell can't be carved around it properly until they're closed.`;
   $("#scanWarnFix").hidden = tried;
+  $$('[data-prep=repair]:not(#scanWarnFix)').forEach((b) => b.hidden = !info.watertight); // the warning has its own
   fillSize();
   const g = await loadSTL(info.stl_url);
   g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 3), 3));
@@ -1711,7 +1714,7 @@ $("#sizeCancel").onclick = () => { sizerReset(); fillSize(); };
 $("#sizeApply").onclick = () => {
   const sz = S.scan.size;
   const f = $("#sizeLock").checked && sizeF ? [sizeF, sizeF, sizeF] : sizeIds.map((id, j) => parseFloat($("#" + id).value) / sz[j]);
-  if (f.some((x) => !(x > 0.05 && x < 50))) { toast("Those sizes don't look right, so the scan wasn't changed. Type the size in mm."); sizerReset(); fillSize(); return; }
+  if (f.some((x) => !(x > 0.05 && x < 50))) { toast(`Those sizes don't look right, so the scan wasn't changed. Type the size in ${({ mm: "mm", cm: "cm", in: "inches" })[window.__units?.get() || "mm"]}.`); sizerReset(); fillSize(); return; }
   if (f.every((x) => Math.abs(x - 1) < 1e-6)) { sizerReset(); fillSize(); return; }
   withBusy("Resizing the scan", async () => {
     await showScan(await api("/api/prep", { op: "scale", value: f }), true);
@@ -2428,10 +2431,15 @@ function go(step) {
   if (step === "load") { groups.latex.visible = false; loadRecent(); }
   if (step === "cut" && S.T) refresh();
   else { detachHandle(); groups.planes.visible = groups.regions.visible = groups.arrows.visible = false; }
+  const see = step === "done" && S.show === "latex" && !S.build?.slices_only;
+  groups.pieces.children.forEach((m) => { m.material.transparent = see; m.material.opacity = see ? 0.32 : 1; m.material.depthWrite = !see; m.material.needsUpdate = true; });
   if (latexMesh) { latexMesh.material.transparent = step === "done"; latexMesh.material.opacity = step === "done" ? 0.9 : 1; latexMesh.material.depthWrite = true; latexMesh.material.needsUpdate = true; }
   applyInsView();
 }
 $$(".step").forEach((b) => b.onclick = () => go(b.dataset.step));
+$("#drop").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#fileInput").click(); } });
+document.addEventListener("pointerdown", (e) => { const t = $("#toggles"); if (t.open && !t.contains(e.target)) t.open = false; }, true);
+document.addEventListener("keydown", (e) => { const t = $("#toggles"); if (e.key === "Escape" && t.open) { t.open = false; t.querySelector("summary").focus(); } }, true);
 
 // file in
 async function takeFile(file) {
@@ -2460,7 +2468,7 @@ view.addEventListener("drop", (e) => takeFile(e.dataTransfer.files[0]));
 // a scan that came in only millimetres across gets scaled up on loading: say so
 function grownNote(info) {
   showTab("scan");
-  toast(`This scan came in only ${+(+info.grown.was).toPrecision(2)} mm across, so it was probably saved in metres or another unit. ` +
+  toast(`This scan came in only ${+(+info.grown.was).toPrecision(2)} mm across, so it was probably saved in meters or another unit. ` +
     `GnomeShell made it ${info.grown.factor}× bigger: it's now ${fmtDims(info.size || info.dims)} mm. If that isn't right, type the real size under Size.`, true);
 }
 async function openRecent(name) {
@@ -2516,6 +2524,7 @@ function startBuild(slicesOnly) {
   if (S.scan && !S.scan.watertight) { toast($("#scanWarnText").textContent); showTab("scan"); return; }
   const T = S.T;
   if (T.locked.length) { toast(`Pieces ${T.locked.map((i) => i + 1).join(", ")} can't come off as set. Change one of their arrows first.`); return; }
+  if (!slicesOnly && insPokes()) return;
   // every line between two pieces, so channels that a line would cut get skipped
   const byId = new Map(T.cells.map((L) => [L.id, L]));
   const cuts = [];
@@ -2576,7 +2585,7 @@ async function showBuild(res) {
     <dt>Fits your plate</dt><dd style="color:${res.fits_plate ? "var(--ok)" : "#f08a70"}">${res.fits_plate ? "yes" : "no"}</dd>
     <dt>Slices</dt><dd>${S.settings.test_slice_style === "VERTICAL" ? "upright, across the seam" : "level"}</dd>`;
     $("#doneOrder").innerHTML = "";
-    $("#donePath").textContent = res.folder;
+    showFolder(res.folder);
     return;
   }
   $("#doneKv").innerHTML = `
@@ -2601,7 +2610,11 @@ async function showBuild(res) {
   $("#doneOrder").innerHTML = ord.length && steps.length > 1 ? `<h2>Take them off in this order</h2><div class="order">${steps.map((s) =>
     `<div><span class="chip">${ordinal(s)}</span><span>${ord.filter((o) => o.order === s).map((o) => o.name.replace("SHELL_", "Piece ")).join(", ")}</span></div>`).join("")}</div>` :
     ord.length ? '<p class="muted small">The pieces can come off in any order.</p>' : "";
-  $("#donePath").textContent = res.folder;
+  showFolder(res.folder);
+}
+function showFolder(path) {
+  const el = $("#donePath"), name = String(path || "").split(/[\\/]/).filter(Boolean).pop() || "";
+  el.textContent = name ? `Saved in the folder "${name}"` : ""; el.title = path || "";
 }
 // every printed piece on printer plates, side by side, as the engine laid them out
 function textSprite(text, h) {
@@ -2621,7 +2634,9 @@ function drawPlates(res) {
   const [W, D] = res.plate_bed, gap = Math.max(40, W * 0.18);
   const byName = new Map(groups.pieces.children.map((m) => [m.userData.name, m]));
   plates.forEach((pl, k) => {
-    const g = new THREE.Group(); g.position.x = k * (W + gap);
+    // several plates go in rows, so each stays big enough to see
+    const cols = Math.ceil(Math.sqrt(plates.length)), g = new THREE.Group();
+    g.position.x = (k % cols) * (W + gap); g.position.y = -Math.floor(k / cols) * (D + gap * 1.5);
     const bed = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshBasicMaterial({ color: "#2a3035", side: THREE.DoubleSide }));
     bed.position.set(W / 2, D / 2, -0.3);
     const edge = new THREE.LineSegments(lineGeometry([new V3(0, 0, 0), new V3(W, 0, 0), new V3(W, 0, 0), new V3(W, D, 0), new V3(W, D, 0), new V3(0, D, 0), new V3(0, D, 0), new V3(0, 0, 0)]),
@@ -2635,6 +2650,11 @@ function drawPlates(res) {
       const m = new THREE.Mesh(src.geometry, it.too_big ? new THREE.MeshStandardMaterial({ color: COL.bad, roughness: 0.6, side: THREE.DoubleSide }) : src.material);
       m.matrixAutoUpdate = false; m.matrix.set(...it.matrix);
       g.add(m);
+      if (!src.geometry.boundingBox) src.geometry.computeBoundingBox();
+      const bb = src.geometry.boundingBox.clone().applyMatrix4(m.matrix), c = bb.getCenter(new V3()), h = Math.max(8, W * 0.045);
+      const tag = textSprite(it.name.replace("SHELL_", ""), h);
+      tag.position.set(c.x, c.y, bb.max.z + h * 0.8);
+      g.add(tag);
     }
     groups.plates.add(g);
   });
@@ -2656,7 +2676,7 @@ function framePlates() {
   const c = b.getCenter(new V3()), s = b.getSize(new V3());
   // far enough back that every plate and the tallest piece are in view
   const fit = Math.max(s.x / camera.aspect, s.y + s.z * 0.6) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
-  camera.position.copy(c).add(new V3(0, -0.75, 1).normalize().multiplyScalar(fit * 1.35));
+  camera.position.copy(c).add(new V3(0, -0.4, 1).normalize().multiplyScalar(fit * 1.35));
   orbit.target.copy(c); orbit.update();
 }
 function setShow(v) { S.show = v; $$("#doneTools button").forEach((x) => x.classList.toggle("on", x.dataset.show === v)); }
@@ -3060,7 +3080,7 @@ function insFitAt(T) {
 
 function insFill() {
   const s = S.insert;
-  $("#insOn").checked = !!s.on; $("#insBody").hidden = !s.on; $("#insKeep").checked = s.keep !== false;
+  $("#insOn").checked = !!s.on; $("#insBody").hidden = !s.on; $("#insIntro").hidden = !!s.on; $("#insKeep").checked = s.keep !== false;
   $$("#insShape button").forEach((b) => b.classList.toggle("on", b.dataset.shape === s.shape));
   $$("[data-ins]").forEach((el) => { el.value = s[el.dataset.ins]; });
   $("#insWl").textContent = s.shape === "round" ? "Diameter (mm)" : "Width (mm)";
@@ -3179,7 +3199,7 @@ function applyInsView() {
   $("#insViewBar").hidden = !on;
   $("#railIns").classList.toggle("on", on);
   $("#railIns").setAttribute("aria-pressed", String(on));
-  $("#railIns").title = S.insert?.on ? "Just the insert and its holder, with the latex and shell greyed out (I)" : "Turn the silicone insert on first, on the Insert tab";
+  $("#railIns").title = S.insert?.on ? "Just the insert and its holder, with the latex and shell grayed out (I)" : "Turn the silicone insert on first, on the Insert tab";
   paintTabs();
   if (S.step === "cut") { $("#legend").hidden = on; $("#hud").hidden = on; $("#labels").hidden = on; $("#toggles").hidden = on; }
   if (!on) return;
@@ -3391,8 +3411,17 @@ const insSpec = () => {
   const L = insLayout(S.insert, S.T);
   return { shape: S.insert.shape, w: S.insert.w, d: insD(S.insert), h: S.insert.h, wall: S.insert.wall, round: S.insert.round, least: S.insert.least, cx: L.c[0], cy: L.c[1], spots: L.spots };
 };
+// the insert can't go through the latex: say so, and show it, instead of building
+function insPokes() {
+  const c = S.insert?.on && S.insertCheck;
+  if (!c || !(c.thin < 0)) return false;
+  toast(`The silicone insert pokes through the latex by ${(-c.thin).toFixed(0)} mm, so the concrete would have a hole. Press Fit to the latex, make it smaller, or turn the insert off, then build.`);
+  showTab("insert");
+  return true;
+}
 $("#insOnly").onclick = () => {
   if (!S.T || !S.insert.on) return;
+  if (insPokes()) return;
   if (!insValid(S.insert)) { toast("The insert's wall leaves no room for the core."); return; }
   const T = S.T;
   withBusy("Making the holder and cup", async () => {
@@ -3441,8 +3470,13 @@ window.__ms = { showTab, splitPartOf, SPLIT, curTab, sizerAt, drawSizer, sizerOn
   $$("details.group").forEach((d) => {
     const key = d.dataset.pnl || d.querySelector("summary span")?.textContent.trim(); if (!key) return;
     if (key in st) d.open = !!st[key];
-    d.addEventListener("toggle", () => { st[key] = d.open; try { localStorage.setItem("gs.panels", JSON.stringify(st)); } catch (e) { /* not kept */ } });
+    d.addEventListener("toggle", () => {
+      if (d.open && d.dataset.in === "scan") $$('details.group[data-in="scan"]').forEach((o) => { if (o !== d && o.open) o.open = false; });
+      st[key] = d.open; try { localStorage.setItem("gs.panels", JSON.stringify(st)); } catch (e) { /* not kept */ }
+    });
   });
+  const open = $$('details.group[data-in="scan"]').filter((d) => d.open);
+  open.slice(1).forEach((d) => { d.open = false; });
 })();
 
 // Units shown: everything inside stays in mm. Inputs that hold a length show

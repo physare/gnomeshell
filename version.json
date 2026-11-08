@@ -1,4 +1,5 @@
 {
-  "version": "0.13.4",
-  "notes": "- Pour spout: clicking the model to place the spout now keeps you on the Scan tab with the spout panel open.\n- Test slices: a piece made from a stray bit now always gets its own test slice."
+  "version": "0.13.5",
+  "tag": "v0.13.5",
+  "notes": "- Silicone insert: GnomeShell won't build while the insert pokes through the latex.\n- Scan tab: one section open at a time, in order of use. The view's checkboxes are in one Show menu.\n- Build screen: With latex shows the shell see-through, Plates looks from higher up with each piece labeled, and the panel waits while a build runs.\n- Clearer names in Settings, US spelling, and better keyboard use, contrast and small-window layout.\n- Safer: only GnomeShell's own window can send it commands, and updates install from the tagged release."
 }

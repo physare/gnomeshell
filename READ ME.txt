@@ -47,7 +47,7 @@ USE
      comes in as it looks in Blender (modifiers applied), joined into one
      model. If the .blend won't open, export an STL or OBJ from Blender.
      A scan that comes in under 20 mm across was saved in other units
-     (Blender's metres, say), so GnomeShell scales it up by 10, 100 or
+     (Blender's meters, say), so GnomeShell scales it up by 10, 100 or
      1000 to somewhere between 50 mm and 1 m and tells you. If the size
      it picked is wrong, type the real one under Size.
   2. Prepare & cut:
@@ -93,7 +93,7 @@ USE
          a box round the model, red when the model is too big. Suggest cuts
          finds level cuts (and upright ones if it's too wide) so every part
          fits, at spots where the cut is solid with room for pegs. Each part
-         shows in its own colour on the model, and each cut has a numbered
+         shows in its own color on the model, and each cut has a numbered
          orange handle: drag it to move that cut, or use its slider or type
          a number. + Level cut, + Upright, across and + Upright, front-back
          add a cut. An upright cut can go through the whole model or just
@@ -128,7 +128,8 @@ USE
          Thickness, Gap to model (0 fits exactly) and a Stiff edge along the
          outer edge are settings. Save seam card STL saves each card laid
          flat as "<name> - seam card.stl" in the scan's folder. Cards show
-         in the view; untick Seam cards at the top to hide them.
+         in the view; untick Seam cards in the Show menu at the top to hide
+         them.
        - Gap webs (Scan tab): a thin flat sheet across a gap that's closed
          all round, like between the legs or an arm on the hip, so the
          latex can be pulled out and the web punched out of the concrete.
@@ -138,7 +139,7 @@ USE
          Add webs joins them onto the model and Ctrl+Z takes them off. A gap
          has to be see-through from some angle to be found.
        - Cuts: the best first cut is found for you. Each piece shows in its
-         own colour on the model; red areas would catch. Click the model to
+         own color on the model; red areas would catch. Click the model to
          pick a piece. Only the cut you're working on shows its plane (Lines
          mode shows them all).
          Click a cut's card to open it. Move it with Turn / Tilt / Position,
@@ -182,25 +183,25 @@ USE
          adds are normal cuts you can move or delete.
        - Pour collar: carries the base opening down so you have room to pour.
        - Test slices: pink in the view shows where they'll be cut, with a
-         line where each one meets the latex (untick Test slices at the top
-         to hide it). Upright: one slice across the main seam through the
+         line where each one meets the latex (untick Test slices in the Show
+         menu at the top to hide it). Upright: one slice across the main seam through the
          top of the latex, and a slice through the middle of any piece that
          line misses. Level: partway up each piece, clear of the channels.
        - Insert tab (for big pieces, off until you tick it for a scan):
          a hollow silicone insert hangs in the latex so the casting comes out
          with a cavity. Pick round, oval, square or rectangle, and set its
          size, height, silicone wall (3 mm) and the least concrete you want
-         round it (20 mm). Ticking it centres the insert on the opening and
+         round it (20 mm). Ticking it centers the insert on the opening and
          sizes it to the latex, and with "Keep it sized to the latex" ticked
          it sizes itself again whenever you change the wall, concrete, shape
-         or centre. If the opening is too narrow for your least concrete, it
+         or center. If the opening is too narrow for your least concrete, it
          keeps your wall and fits with the most concrete the opening allows
          (shown in amber). To size it yourself, pull the dots in the view:
          white on the side for width (and depth), white at the far end for
          height, gold at the opening to slide it. "Fit to the latex" puts
          it back. Ctrl+Z undoes insert changes too.
          "Insert view" (in the tab or the tool rail, or the I key) shows just the insert and its holder,
-         solid, with the latex and shell greyed out; the dots still work
+         solid, with the latex and shell grayed out; the dots still work
          there. Esc goes back to the cuts. It shows
          in blue, with the thinnest spot of concrete marked, and the panel
          says how much silicone to mix. The holder (purple lines) sits on the
@@ -218,7 +219,8 @@ USE
          down tight, then it clicks: that's locked. Run a bungee over each
          corner tab so the cord sits in its groove and holds the holder down
          while you pour. "Make just the
-         holder and cup" makes those two without the shell.
+         holder and cup" makes those two without the shell. If the insert
+         pokes through the latex, GnomeShell won't build until it's smaller.
        - Settings tab: pour collar, shell, bungee channels (tick Pairs
          for two side by side at each level), test slice, build plate.
          Anything you change is saved as your default for every scan. Each

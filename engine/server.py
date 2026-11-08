@@ -11,6 +11,7 @@ import json
 import math
 import os
 import queue
+import re
 import subprocess
 import urllib.request
 import shutil
@@ -42,7 +43,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.13.4"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.13.5"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -119,6 +120,7 @@ LIMITS = {
     "bump_r_mm": ("Alignment bumps", 0, 8, False),
 }
 
+BUSY_LOCK = threading.Lock()  # one job at a time; checked and taken in one step
 STATE = {"latex": None, "name": None, "folder": None, "progress": "", "busy": False,
          "last_ping": None, "bye_at": None, "quit": False, "job_end": 0.0}
 JOBS = queue.Queue()
@@ -1334,7 +1336,9 @@ def update_check(force=False):
     try:
         v = json.loads(_fetch(f"https://raw.githubusercontent.com/{UPDATE_REPO}/{UPDATE_BRANCH}/version.json?t={int(time.time())}") or b"{}")
         latest = str(v.get("version") or "")
-        info.update(latest=latest, notes=str(v.get("notes") or "")[:2000], newer=_ver(latest) > _ver(APP_VERSION))
+        tag = str(v.get("tag") or "")
+        info.update(latest=latest, notes=str(v.get("notes") or "")[:2000], newer=_ver(latest) > _ver(APP_VERSION),
+                    tag=tag if re.fullmatch(r"v[0-9][0-9.]*", tag) else "")
     except Exception as e:  # offline, or GitHub didn't answer: no update, no fuss
         info["error"] = str(e)
     UPDATE.update(checked=time.time(), info=info)
@@ -1349,11 +1353,18 @@ def update_install():
                            "Couldn't reach GitHub to download the update. Check the internet connection and try again.")
     import io
     import zipfile
-    data = _fetch(f"https://codeload.github.com/{UPDATE_REPO}/zip/refs/heads/{UPDATE_BRANCH}", timeout=180)
+    # the release's own tag when version.json names one, so a half-finished push to main never reaches anyone
+    ref = f"tags/{info['tag']}" if info.get("tag") else f"heads/{UPDATE_BRANCH}"
+    try:
+        data = _fetch(f"https://codeload.github.com/{UPDATE_REPO}/zip/refs/{ref}", timeout=180)
+    except urllib.error.HTTPError as e:  # the tag isn't up yet: the main branch has the same release
+        if e.code != 404 or not info.get("tag"):
+            raise
+        data = _fetch(f"https://codeload.github.com/{UPDATE_REPO}/zip/refs/heads/{UPDATE_BRANCH}", timeout=180)
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         files = {}
         for n in z.namelist():
-            parts = n.replace("\\", "/").split("/")[1:]  # drop the "gnomeshell-main/" folder
+            parts = n.replace("\\", "/").split("/")[1:]  # drop the "gnomeshell-main/" (or tag) folder
             if not parts or not parts[-1] or ".." in parts or parts[0] in SKIP_ON_UPDATE:
                 continue
             files["/".join(parts)] = n
@@ -1432,6 +1443,15 @@ class Handler(BaseHTTPRequestHandler):
         host = (self.headers.get("Host") or "").split(":")[0]
         return host in ("127.0.0.1", "localhost")
 
+    def _own_page(self):
+        """A command must come from GnomeShell's own window (or a tool with no
+        Origin, like a newer engine asking for the port), never another site."""
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True
+        port = self.server.server_address[1]
+        return origin in (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
+
     def do_GET(self):
         if not self._local_only():
             return self._send(403, {"error": "local only"})
@@ -1455,12 +1475,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(os.path.join(OUT_ROOT, safe_name(p.rsplit("/", 1)[1]), "scan.stl"))
         rel = "index.html" if p in ("/", "") else p.lstrip("/")
         full = os.path.normpath(os.path.join(WEB, rel))
-        if not full.startswith(WEB):
+        if not (full == WEB or full.startswith(WEB + os.sep)):
             return self._send(403, {"error": "no"})
         return self._file(full)
 
     def do_POST(self):
-        if not self._local_only():
+        if not self._local_only() or not self._own_page():
             return self._send(403, {"error": "local only"})
         p = self.path.split("?")[0]
         if p == "/api/bye":
@@ -1553,19 +1573,23 @@ class Handler(BaseHTTPRequestHandler):
                 if hasattr(os, "startfile"):
                     os.startfile(target)  # Windows: opens with the program set for .3mf, or Explorer
                 return self._send(200, {"opened": target})
+        except (ValueError, RuntimeError) as e:  # a bad value, or a job that can't run now: say why
+            print("  Refused:", e, flush=True)
+            return self._send(400, {"error": str(e)})
         except Exception as e:  # report to the screen instead of dying
             traceback.print_exc()
             return self._send(500, {"error": str(e)})
         return self._send(404, {"error": "old_engine"})
 
     def _busy(self, fn, *args):
-        if STATE["busy"]:
+        if not BUSY_LOCK.acquire(blocking=False):
             raise RuntimeError("Still working on the last request.")
         STATE["busy"] = True
         try:
             return run_job(fn, *args)
         finally:
             STATE["busy"] = False
+            BUSY_LOCK.release()
 
 
 def _app_browser():

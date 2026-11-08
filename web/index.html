@@ -54,22 +54,22 @@
         </div>
         <span class="tsep" aria-hidden="true"></span>
         <span class="tlabel">Pick</span>
-        <button type="button" data-mode="pieces" class="on" title="Click pieces in the view (P)">Pieces</button>
-        <button type="button" data-mode="lines" title="Click the lines between pieces (L)">Lines</button>
+        <button type="button" data-mode="pieces" class="on" title="Click pieces in the view (P)" aria-label="Pick pieces">Pieces</button>
+        <button type="button" data-mode="lines" title="Click the lines between pieces (L)" aria-label="Pick lines">Lines</button>
       </div>
       <span class="tsep" aria-hidden="true"></span>
       <span class="tlabel">Insert</span>
-      <button type="button" id="railIns" title="Just the insert and its holder, with the latex and shell greyed out (I)">Insert view</button>
+      <button type="button" id="railIns" title="Just the insert and its holder, with the latex and shell grayed out (I)">Insert view</button>
       <span class="rfill"></span>
       <button type="button" id="keysBtn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
     </nav>
     <main class="view" id="view">
-      <canvas id="gl"></canvas>
+      <canvas id="gl" role="img" aria-label="3D view of the scan"></canvas>
 
-      <label class="drop" id="drop" for="fileInput">
+      <label class="drop" id="drop" for="fileInput" tabindex="0" role="button" aria-label="Choose a scan file (Ctrl+O)">
         <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--latex)" stroke-width="1.4" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg>
         <span class="drop-title">Drop a latex scan here</span>
-        <span class="drop-sub">STL, OBJ, PLY or .blend file, in millimetres. Watertight scans work best.</span>
+        <span class="drop-sub">STL, OBJ, PLY or .blend file, in millimeters. Watertight scans work best.</span>
         <span class="btn primary">Choose file…</span>
         <input id="fileInput" type="file" accept=".stl,.obj,.ply,.blend" hidden>
       </label>
@@ -78,14 +78,17 @@
         <div class="keys-head"><span class="strong">Shortcuts</span><button type="button" class="x" id="keysClose" aria-label="Close">✕</button></div>
         <dl id="keysList"></dl>
       </div>
-      <div class="toolbar tr" id="toggles" hidden>
-        <label for="tOver"><input id="tOver" type="checkbox" checked> Overhangs</label>
+      <details class="toolbar tr show-menu" id="toggles" hidden>
+        <summary>Show<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="show-list">
+        <label for="tOver"><input id="tOver" type="checkbox" checked> Overhangs in red</label>
         <label for="tPlanes"><input id="tPlanes" type="checkbox" checked> Cut planes</label>
-        <label for="tPieces"><input id="tPieces" type="checkbox" checked> Pieces</label>
+        <label for="tPieces"><input id="tPieces" type="checkbox" checked> Piece colors</label>
         <label for="tPour"><input id="tPour" type="checkbox" checked> Pour collar</label>
         <label for="tSlices"><input id="tSlices" type="checkbox" checked> Test slices</label>
         <label for="tSeam"><input id="tSeam" type="checkbox" checked> Seam cards</label>
-      </div>
+        </div>
+      </details>
       <div class="toolbar tl" id="doneTools" hidden>
         <button type="button" data-show="shell" class="on">Shell</button>
         <button type="button" data-show="latex">With latex</button>
@@ -94,7 +97,7 @@
       </div>
       <div class="legend" id="legend" hidden>
         <span><i class="sw" style="background:var(--bad)"></i>Faces the wrong way: would catch</span>
-        <span><i class="sw" style="background:linear-gradient(90deg,#5fa497 0 25%,#5a8cc4 25% 50%,#957dcb 50% 75%,#c9b45a 75%)"></i>Each piece in its own colour: pulls off cleanly</span>
+        <span><i class="sw" style="background:linear-gradient(90deg,#5fa497 0 25%,#5a8cc4 25% 50%,#957dcb 50% 75%,#c9b45a 75%)"></i>Each piece in its own color: pulls off cleanly</span>
         <span id="legSlice" hidden><i class="sw" style="background:var(--plan)"></i>Where the test slices are cut</span>
         <span class="hint" id="hint">Pieces: click the model to pick a piece · Shift-click for more · right-click for options · drag an arrow tip to change how it pulls off</span>
       </div>
@@ -111,7 +114,7 @@
       </div>
       <label class="spread" id="spreadBox" for="spread" hidden>Pull apart<input id="spread" type="range" min="0" max="120" value="40"><span class="mono" id="spreadVal">40 mm</span></label>
 
-      <div class="busy" id="busy" hidden>
+      <div class="busy" id="busy" role="status" aria-live="polite" hidden>
         <div class="busy-card">
           <div class="spinner" aria-hidden="true"></div>
           <div><div class="busy-title" id="busyTitle">Working…</div><div class="busy-sub" id="busySub"></div></div>
@@ -167,7 +170,23 @@
               </div>
             </div>
           </details>
-          <details class="group pnl" data-in="scan" data-pnl="base" open>
+          <details class="group pnl" data-in="scan" data-pnl="orient">
+            <summary><span>Orientation</span></summary>
+            <div class="group-body">
+              <div class="btn-grid">
+                <button type="button" class="btn" data-prep="lay_flat">Lay flat on base</button>
+                <button type="button" class="btn" data-prep="reset">Reset scan</button>
+              </div>
+              <div class="rot">
+                <span>Rotate 90°</span>
+                <button type="button" class="btn sm" data-rot="x,90">X</button>
+                <button type="button" class="btn sm" data-rot="y,90">Y</button>
+                <button type="button" class="btn sm" data-rot="z,90">Z</button>
+                <button type="button" class="btn sm" data-rot="z,15" title="Turn 15° around Z">Z 15°</button>
+              </div>
+            </div>
+          </details>
+          <details class="group pnl" data-in="scan" data-pnl="base">
             <summary><span>Base</span><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="Puts a base on the model itself. Follow the bottom fills in right up to the underside, however uneven, and carries it straight down (Widen grows it out all round); Flat slab is a plinth round the whole footprint (best when it stands on feet). Set the height here or drag the blue dot under the model. If only a paw or a corner touches the floor, Reach up is raised for you so the base meets the rest of the model; move it to change that. Reset scan takes it off again.">?</span></summary>
             <div class="group-body">
               <div class="seg" role="group" aria-label="Base shape" id="baseShape">
@@ -185,6 +204,28 @@
               </div>
               <button type="button" class="btn sm" id="showModel" title="Open the scan's folder with the saved model picked out">Show saved model in folder</button>
               <p class="small warn-note" id="baseNote" hidden></p>
+            </div>
+          </details>
+          <details class="group pnl" id="fitBox" data-in="scan" data-pnl="fit">
+            <summary><span>Fit your printer</span><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="Splits the model itself (not the shell) into parts that each fit your printer. Each cut gets pegs on the part below and matching holes in the part above, so they line up when you glue them. Suggest cuts picks spots where the cut is solid, with room for pegs; drag a cut's slider to move it. The parts are saved as &quot;&lt;name&gt; - part 1.stl&quot; and so on in the scan's folder. Pick your printer on the Settings tab.">?</span><span class="sum-meta mono" id="fitSum"></span></summary>
+            <div class="group-body">
+              <p class="small" id="fitLine"></p>
+              <label class="check" for="showPrinter"><input id="showPrinter" type="checkbox" checked> Show the printer's space in the view</label>
+              <div class="btn-grid">
+                <button type="button" class="btn" id="splitSuggest">Suggest cuts</button>
+                <button type="button" class="btn" id="splitAdd">+ Level cut</button>
+                <button type="button" class="btn" id="splitAddX">+ Upright, across</button>
+                <button type="button" class="btn" id="splitAddY">+ Upright, front–back</button>
+              </div>
+              <p class="small muted" id="splitHint" hidden>Each part shows in its own color. Drag a numbered handle in the view, or a slider, to move a cut.</p>
+              <div id="splitCuts"></div>
+              <div class="fields">
+                <label for="peg_d_mm">Peg diameter (mm)<input id="peg_d_mm" data-set type="number" step="0.5" min="2" max="30"></label>
+                <label for="peg_len_mm">Peg length (mm)<input id="peg_len_mm" data-set type="number" step="1" min="3" max="60"></label>
+                <label for="peg_clear_mm" title="How much bigger the hole is than the peg">Hole clearance (mm)<input id="peg_clear_mm" data-set type="number" step="0.05" min="0" max="2"></label>
+              </div>
+              <div id="splitParts" class="small"></div>
+              <button type="button" class="btn primary" id="splitGo" disabled>Split and save parts</button>
             </div>
           </details>
           <details class="group pnl" data-in="scan" data-pnl="spout">
@@ -243,26 +284,11 @@
               </div>
             </div>
           </details>
-          <details class="group pnl" data-in="scan" data-pnl="orient" open>
-            <summary><span>Orientation</span></summary>
-            <div class="group-body">
-              <div class="btn-grid">
-                <button type="button" class="btn" data-prep="lay_flat">Lay flat on base</button>
-                <button type="button" class="btn" data-prep="reset">Reset scan</button>
-              </div>
-              <div class="rot">
-                <span>Rotate 90°</span>
-                <button type="button" class="btn sm" data-rot="x,90">X</button>
-                <button type="button" class="btn sm" data-rot="y,90">Y</button>
-                <button type="button" class="btn sm" data-rot="z,90">Z</button>
-                <button type="button" class="btn sm" data-rot="z,15" title="Turn 15° around Z">Z 15°</button>
-              </div>
-            </div>
-          </details>
           <details class="group pnl" data-in="scan" data-pnl="clean">
             <summary><span>Units &amp; clean-up</span></summary>
             <div class="group-body">
-              <div class="row-label">Scan was saved in</div>
+              <div class="row-label">Rescale: the file was in</div>
+              <p class="muted small">Only if the scan came in the wrong size. Changing this resizes it.</p>
               <div class="seg" role="group" aria-label="Scan units">
                 <button type="button" data-scale="1" class="on">mm</button>
                 <button type="button" data-scale="10">cm</button>
@@ -284,49 +310,26 @@
             </div>
           </details>
 
-          <details class="group pnl" id="fitBox" data-in="scan" data-pnl="fit" open>
-            <summary><span>Fit your printer</span><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="Splits the model itself (not the shell) into parts that each fit your printer. Each cut gets pegs on the part below and matching holes in the part above, so they line up when you glue them. Suggest cuts picks spots where the cut is solid, with room for pegs; drag a cut's slider to move it. The parts are saved as &quot;&lt;name&gt; - part 1.stl&quot; and so on in the scan's folder. Pick your printer on the Settings tab.">?</span><span class="sum-meta mono" id="fitSum"></span></summary>
-            <div class="group-body">
-              <p class="small" id="fitLine"></p>
-              <label class="check" for="showPrinter"><input id="showPrinter" type="checkbox" checked> Show the printer's space in the view</label>
-              <div class="btn-grid">
-                <button type="button" class="btn" id="splitSuggest">Suggest cuts</button>
-                <button type="button" class="btn" id="splitAdd">+ Level cut</button>
-                <button type="button" class="btn" id="splitAddX">+ Upright, across</button>
-                <button type="button" class="btn" id="splitAddY">+ Upright, front–back</button>
-              </div>
-              <p class="small muted" id="splitHint" hidden>Each part shows in its own colour. Drag a numbered handle in the view, or a slider, to move a cut.</p>
-              <div id="splitCuts"></div>
-              <div class="fields">
-                <label for="peg_d_mm">Peg diameter (mm)<input id="peg_d_mm" data-set type="number" step="0.5" min="2" max="30"></label>
-                <label for="peg_len_mm">Peg length (mm)<input id="peg_len_mm" data-set type="number" step="1" min="3" max="60"></label>
-                <label for="peg_clear_mm" title="How much bigger the hole is than the peg">Hole clearance (mm)<input id="peg_clear_mm" data-set type="number" step="0.05" min="0" max="2"></label>
-              </div>
-              <div id="splitParts" class="small"></div>
-              <button type="button" class="btn primary" id="splitGo" disabled>Split and save parts</button>
-            </div>
-          </details>
-
           <div data-in="cuts" class="head-row">
             <h2>Cuts</h2>
             <button type="button" class="btn" id="bestCut">Find best first cut</button>
           </div>
           <div data-in="cuts" id="cuts"></div>
           <button data-in="cuts" type="button" class="btn dashed" id="addCut">+ Cut through the whole shell</button>
-
-          <div data-in="cuts" class="head-row">
-            <span class="h2wrap"><h2>Pieces</h2><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="Click a piece here or in the view to split it or change how it pulls off. Shift-click more (Ctrl+A for all) to split them together or join them.">?</span></span>
-            <button type="button" class="btn" id="autoCuts">Suggest more cuts</button>
-          </div>
-          <div data-in="cuts" class="multibar" id="multiBar" hidden><span></span><button type="button" class="btn sm" id="mergeBtn" title="Remove the lines between them (M)">Join them</button></div>
-          <div data-in="cuts" class="multisplit" id="multiSplit" hidden></div>
-          <div data-in="cuts" id="pieces" class="pieces"></div>
-          <div data-in="cuts" class="lockwarn" id="lockWarn" role="status" hidden></div>
           <div data-in="cuts" class="meter slim" id="meter">
             <div class="meter-top"><span>Overhang</span><span class="mono big" id="overPct">–</span></div>
             <div class="bar"><div id="overBar"></div></div>
             <span class="small" id="overNote"></span>
           </div>
+
+          <div data-in="cuts" class="head-row">
+            <span class="h2wrap"><h2>Pieces</h2><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="Click a piece here or in the view to split it or change how it pulls off. Shift-click more (Ctrl+A for all) to split them together or join them.">?</span></span>
+            <button type="button" class="btn" id="autoCuts">Suggest more cuts</button>
+          </div>
+          <div data-in="cuts" class="multibar" id="multiBar" hidden><span></span><button type="button" class="btn sm" id="mergeBtn" title="Remove the lines between them (M)">Join picked pieces</button></div>
+          <div data-in="cuts" class="multisplit" id="multiSplit" hidden></div>
+          <div data-in="cuts" id="pieces" class="pieces"></div>
+          <div data-in="cuts" class="lockwarn" id="lockWarn" role="status" hidden></div>
 
           <details class="group" id="layoutsBox" data-in="cuts">
             <summary><span>Saved layouts</span><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="The cuts you're working on are also kept as you go, and come back when you open this scan again.">?</span><span class="sum-meta mono" id="layoutsSum"></span></summary>
@@ -340,6 +343,7 @@
             <summary><span>Silicone insert</span><span class="sum-meta mono" id="insSum">off</span></summary>
             <div class="group-body">
               <label class="check" for="insOn"><input id="insOn" type="checkbox"> Use a silicone insert for this scan <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="For big pieces. Makes a holder (core, air holes and twist-lock pegs) and a cup to cast the silicone in, and puts twist-lock holes in the shell's corners.">?</span></label>
+              <p class="muted small" id="insIntro">For big pieces. A silicone core sits inside the mold, so the concrete comes out hollow and uses less. GnomeShell makes a holder and a cup to cast the core in, and puts twist-lock holes in the shell's corners.</p>
               <div id="insBody" hidden>
                 <div class="seg four" role="group" aria-label="Insert shape" id="insShape">
                   <button type="button" data-shape="round">Round</button>
@@ -358,9 +362,9 @@
                 </div>
                 <div class="btn-grid">
                   <button type="button" class="btn sm" id="insFit">Fit to the latex</button>
-                  <button type="button" class="btn sm" id="insCentre">Centre on opening</button>
+                  <button type="button" class="btn sm" id="insCentre">Center on opening</button>
                 </div>
-                <button type="button" class="btn sm" id="insView" title="Just the insert and its holder, with the latex and shell greyed out (I)">Insert view</button>
+                <button type="button" class="btn sm" id="insView" title="Just the insert and its holder, with the latex and shell grayed out (I)">Insert view</button>
                 <dl class="kv" id="insKv"></dl>
                 <button type="button" class="btn sm" id="insOnly" title="Pour the silicone into the cup, then push the holder's core in until the hub sits in the collar. Build shell makes the holder and cup too.">Make just the holder and cup</button>
               </div>
@@ -425,7 +429,7 @@
               </div>
               <div class="fields">
                 <label for="test_slice_mm">Thickness (mm)<input id="test_slice_mm" data-set type="number" step="0.1" min="0.1" max="20"></label>
-                <label for="test_slice_at">Level height (0–1)<input id="test_slice_at" data-set type="number" step="0.05" min="0.05" max="0.95"></label>
+                <label for="test_slice_at" title="How far up the piece a level test slice is cut">Level slice height (%)<input id="test_slice_at" data-set data-pct type="number" step="5" min="5" max="95"></label>
               </div>
               <p class="muted small" id="sliceNote"></p>
             </div>
@@ -454,8 +458,8 @@
                 <label for="bed_d_mm">Plate depth (mm)<input id="bed_d_mm" data-set type="number" step="1" min="50" max="1000"></label>
                 <label for="bed_h_mm">Max height (mm)<input id="bed_h_mm" data-set type="number" step="1" min="50" max="1000"></label>
                 <label class="check" for="split_big_pieces" title="A shell piece too big for your printer is cut into parts that fit, with pegs and holes to join them"><input id="split_big_pieces" data-set type="checkbox"> Split shell pieces that don't fit the printer</label>
-                <label for="max_tilt_deg">Auto-cut max tilt (°)<input id="max_tilt_deg" data-set type="number" step="5" min="0" max="60"></label>
-                <label for="draft_deg">Overhang tolerance (°)<input id="draft_deg" data-set type="number" step="0.5" min="0" max="15"></label>
+                <label for="max_tilt_deg" title="How far from upright Find best first cut and Suggest more cuts may tilt a cut">Steepest suggested cut (°)<input id="max_tilt_deg" data-set type="number" step="5" min="0" max="60"></label>
+                <label for="draft_deg" title="A face that leans back against the pull by less than this still counts as clean, because the latex flexes past it. Higher shows less red.">Let faces lean back up to (°)<input id="draft_deg" data-set type="number" step="0.5" min="0" max="15"></label>
                 <label for="auto_max_pieces">Suggest up to (pieces)<input id="auto_max_pieces" data-set type="number" step="1" min="2" max="16"></label>
               </div>
               <button type="button" class="btn sm resetDefaults">Reset all settings to the defaults</button>
@@ -481,7 +485,7 @@
           <div id="doneOrder"></div>
           <h2>Print first</h2>
           <div class="files" id="filesFirst"></div>
-          <p class="muted small" id="shellNext" hidden>Print these and try them on the latex. If they're loose or tight, go back, change the size under Prepare scan and cut them again. When they fit, build the shell.</p>
+          <p class="muted small" id="shellNext" hidden>Print these and try them on the latex. If they're loose or tight, go back to Prepare &amp; cut, change the size on the Scan tab, and cut them again. When they fit, build the shell.</p>
           <h2>Then the shell</h2>
           <div class="files" id="filesShell"></div>
           <h2>For the silicone insert</h2>
