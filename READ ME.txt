@@ -210,6 +210,8 @@ USE
          says how much silicone to mix. The holder (purple lines) sits on the
          shell's open face with a peg in each corner. The corners are
          numbered 1 to 4 at the pegs, the same numbers the panel's notes use.
+         The Bottom view (next to Top, or Ctrl+Numpad 7) looks up from
+         underneath, to check the pegs in their slots after a build.
          The pegs always sit at the box's four corners, so the holder is a
          rectangle. Peg size is the width of each peg's head (20 mm by
          default, 10 at the least). If a corner's slot comes too close to the
@@ -223,10 +225,12 @@ USE
            holder.3mf      core (the inside of the silicone) with 3 air
                            holes, hub, arms, four twist-lock pegs and a
                            grooved tab off each corner for a bungee cord
-           insert_cup.3mf  the cup the silicone is cast in (the insert mold)
+           insert_cup.3mf  the insert mold: a thin skin (Mold wall, 0.56 mm by
+                           default) with a copy of the holder's core inside
            and the shell gets a twist-lock slot in each corner of its open face.
-         To cast: pour the silicone into the cup, then push the holder's core
-         down into it until the hub sits inside the cup's collar. To use: drop
+         To cast: pour the silicone into the insert mold, to the brim. Once
+         it has set, tear the thin wall off, pull the insert off the mold's
+         core, and slide it onto the holder's core (the same shape). To use: drop
          the pegs into the slots and turn the holder clockwise (the panel
          says how far, about 20 degrees, as you look down at the opening).
          The last bit of the turn gets stiff as the seat pulls the holder

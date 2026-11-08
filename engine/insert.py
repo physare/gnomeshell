@@ -38,7 +38,9 @@ DEFAULTS = dict(
     # printed parts
     arm_w=14.0, arm_t=6.0, frame_w=10.0, hub_lip=5.0,
     air_d=4.0, air_n=3, taper_deg=1.0,
-    cup_wall=3.0, cup_floor=3.0, collar_h=4.0, collar_w=3.0, cup_fit=0.5,
+    # the cup (the insert's mold) is a thin skin you tear off once the silicone
+    # has set, cup_wall on the sides and the floor, with a copy of the core inside
+    cup_wall=0.56, cup_floor=0.56, collar_h=4.0, collar_w=0.8, cup_fit=0.5,
     # twist-lock pegs (a cam lock): a 12 mm neck with a flare at the root, a 20 mm
     # head with a 45° underside that sits in a matching seat under a 4 mm lip of
     # shell. The seat ramps `ramp` mm along the turn so turning pulls the holder
@@ -64,6 +66,19 @@ def spec_from(d):
     for k in ("w", "d", "h", "wall", "round", "least", "taper"):
         s[k] = float(s[k])
     s["taper"] = min(15.0, max(0.0, s["taper"])) if math.isfinite(s["taper"]) else 0.0
+    try:
+        cw = float(s["cup_wall"])
+    except (TypeError, ValueError):
+        cw = 0.56
+    cw = min(5.0, max(0.3, cw if math.isfinite(cw) else 0.56))
+    s["cup_wall"], s["cup_floor"] = cw, max(cw, 0.56)
+    for k, lo, hi, dflt in (("arm_w", 4, 40, 14.0), ("frame_w", 4, 40, 10.0), ("arm_t", 3, 20, 6.0)):
+        try:
+            v = float(s[k])
+        except (TypeError, ValueError):
+            v = dflt
+        s[k] = min(hi, max(lo, v if math.isfinite(v) else dflt))
+    s["groove_d"] = min(float(s["groove_d"]), s["arm_t"] - 1.5)  # the bungee groove never cuts through the tab
     # the pegs scale with their head: neck 0.6 of it, root flare up to 1.5 mm, in 2 mm more from the corner
     try:
         pd = float(s["peg_d"])
@@ -499,44 +514,32 @@ def make_holder(s, box, frame4=None):
 
 
 def make_cup(s, box):
-    """The cup to cast the silicone in, upright on the plate: its inside is the
-    insert's outside. The hub plate sits on its rim inside a collar, with
-    notches where the arms cross the collar."""
-    L = layout(s, box)
-    f, h, fit = s["cup_floor"], s["h"], s["cup_fit"]
-    rim = f + h
-    top = rim + s["collar_h"]
-    lip_in = s["hub_lip"] + fit
-    lip_out = lip_in + s["collar_w"]
-    parts = []
-    bm = bmesh.new()
-    _prism(bm, grown(s, s["cup_wall"]), 0.0, rim - 2.0)
-    parts.append(bm)
-    bm = bmesh.new()
-    _prism(bm, grown(s, lip_out), rim - 4.0, top)
-    parts.append(bm)
-    cup = _union("CUP", parts)
+    """The insert's mold, upright on the plate, one print: a thin skin
+    (cup_wall) round the insert's outside, and inside it a copy of the
+    holder's core standing on the floor. The insert's open end is at the
+    floor and its far end at the top, so you pour the silicone to the brim
+    and its level top is the far end. Once it has set, tear the skin off and
+    pull the insert off the core; it then fits the holder's core, which is
+    the same shape."""
     import mold_shell as ms
-    cuts = []
-    bm = bmesh.new()  # the silicone's outside: upside down, so its far end (narrowest, with a taper) is at the floor
-    _prism(bm, ring(s, 0, L["out_in"]), f, rim + 0.01, pts_hi=ring(s, 0))
-    cuts.append(_obj("ms_tmp_cav", bm))
-    bm = bmesh.new()  # room for the hub plate, inside the collar
-    _prism(bm, grown(s, lip_in), rim, top + 1)
-    cuts.append(_obj("ms_tmp_seat", bm))
-    # notches for the arms. The holder goes in upside down (turned over about
-    # its x axis), so the arms' directions flip in y.
-    reach = max(s["w"], s["d"]) / 2 + lip_out + 5
-    cxy = L["c"]
-    for i, (px, py) in enumerate(L["pegs"]):
-        v = np.array([px - cxy[0], -(py - cxy[1])])
-        v = v / (np.linalg.norm(v) or 1)
-        bm = bmesh.new()
-        _bar(bm, tuple(v * (max(s["w"], s["d"]) / 4)), tuple(v * reach), s["arm_w"] + 2 * fit, rim, top + 1)
-        cuts.append(_obj(f"ms_tmp_notch{i}", bm))
-    _bool(cup, cuts, "DIFFERENCE")
-    for o in cuts:
-        ms._remove(o)
+    L = layout(s, box)
+    f, h, cw = s["cup_floor"], s["h"], s["cup_wall"]
+    top = f + h
+    bm = bmesh.new()  # the skin's outside: cup_wall out from the insert all the way up, following the taper
+    _prism(bm, ring(s, cw), 0.0, top, pts_hi=ring(s, cw, L["out_in"]))
+    cup = _obj("CUP", bm)
+    bm = bmesh.new()  # the insert's outside, out through the top
+    k = (h + 1.0) / max(h, 1e-6)
+    _prism(bm, ring(s, 0), f, top + 1.0, pts_hi=ring(s, 0, L["out_in"] * k))
+    cav = _obj("ms_tmp_cav", bm)
+    _bool(cup, [cav], "DIFFERENCE")
+    ms._remove(cav)
+    bm = bmesh.new()  # the core, as on the holder, standing on the floor
+    _prism(bm, ring(s, -s["wall"]), f - min(0.3, f / 2), f + L["core_h"], pts_hi=ring(s, -s["wall"], L["core_in"]))
+    core = _obj("ms_tmp_cupcore", bm)
+    _bool(cup, [core], "UNION")
+    ms._remove(core)
+    cup.name = cup.data.name = "CUP"
     _tidy(cup)
     return cup
 
@@ -562,13 +565,11 @@ def make_silicone(s, box):
 
 
 def cup_matrix(s, box):
-    """From the box frame to the cup's own (as it prints): the holder goes in
-    upside down, so the insert's open end is at the rim and its far end at
-    the cup's floor."""
+    """From the box frame to the cup's own (as it prints): the insert stands
+    the way it hangs, open end on the cup's floor."""
     L = layout(s, box)
     cx, cy = L["c"]
-    top = s["cup_floor"] + s["h"]
-    return Matrix(((1, 0, 0, -cx), (0, -1, 0, cy), (0, 0, -1, top + L["z0"]), (0, 0, 0, 1)))
+    return Matrix(((1, 0, 0, -cx), (0, 1, 0, -cy), (0, 0, 1, s["cup_floor"] - L["z0"]), (0, 0, 0, 1)))
 
 
 # ------------------------------------------------------------ checks

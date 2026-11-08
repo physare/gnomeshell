@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.14.1"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.14.2"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -151,7 +151,7 @@ const center = () => new V3(...(S.scan?.center || [0, 0, 0]));
 const size = () => Math.max(...(S.scan?.dims || [200, 200, 200]));
 function viewFrom(dir) {
   const c = center(); const d = size() * 2.6;
-  const v = { front: [0, -1, 0.12], side: [1, 0, 0.12], top: [0, -0.02, 1], fit: [0.8, -1, 0.55] }[dir];
+  const v = { front: [0, -1, 0.12], side: [1, 0, 0.12], top: [0, -0.02, 1], bottom: [0, -0.02, -1], fit: [0.8, -1, 0.55] }[dir];
   camera.position.copy(c).add(new V3(...v).normalize().multiplyScalar(d));
   orbit.target.copy(c); orbit.update();
 }
@@ -1422,11 +1422,17 @@ const KEYS = [
   ["← →", "On a slider: 1° or 1% (Shift: 5)"], ["O", "Optimize the open cut"], ["M", "Join the picked pieces"],
   ["H / Alt+H", "Hide the row picked in the Scene list / show everything"], ["X", "Overhangs in red on or off"], ["T", "Test slices on or off"],
   ["N", "Hide or show the side panel"], ["Ctrl+S", "Save this cut layout"], ["Ctrl+B", "Build the shell"],
-  ["F", "Fit the view"], ["Numpad 1 / 3 / 7", "Front / side / top view"], ["1 / 2 / 3 / 4", "Scan / Cuts / Insert / Settings tab"], ["I", "Insert view, when the insert is on"], ["?", "Show these keys"],
+  ["F", "Fit the view"], ["Numpad 1 / 3 / 7", "Front / side / top view"], ["Ctrl+Numpad 7", "From underneath"], ["1 / 2 / 3 / 4", "Scan / Cuts / Insert / Settings tab"], ["I", "Insert view, when the insert is on"], ["?", "Show these keys"],
 ];
 $("#keysList").innerHTML = KEYS.map(([k, v]) => `<dt class="mono">${k}</dt><dd>${v}</dd>`).join("");
 $("#keysBtn").onclick = () => { $("#keys").hidden = !$("#keys").hidden; };
 $("#keysClose").onclick = () => { $("#keys").hidden = true; };
+// the views, before a build and after it: Numpad 1 / 3 / 7, Ctrl+Numpad 7 from underneath
+addEventListener("keydown", (e) => {
+  if ((S.step !== "cut" && S.step !== "done") || e.target.matches("input, select, textarea")) return;
+  const v = { Numpad1: "front", Numpad3: "side", Numpad7: e.ctrlKey || e.metaKey ? "bottom" : "top" }[e.code];
+  if (v && !e.altKey) { e.preventDefault(); viewFrom(v); }
+});
 addEventListener("keydown", (e) => {
   if (S.step !== "cut") return;
   const typing = e.target.matches("input[type=number], input[type=text], select, textarea");
@@ -1460,9 +1466,6 @@ addEventListener("keydown", (e) => {
   }
   const tabKey = { Digit1: "scan", Digit2: "cuts", Digit3: "insert", Digit4: "settings" }[e.code];
   if (tabKey) { e.preventDefault(); showTab(tabKey); return; }
-  if (e.code === "Numpad1") return viewFrom("front");
-  if (e.code === "Numpad3") return viewFrom("side");
-  if (e.code === "Numpad7") return viewFrom("top");
   const act = {
     p: () => setMode("pieces"), l: () => setMode("lines"),
     o: () => S.active != null && optimize(S.active, ["az", "tilt", "pos"]),
@@ -2460,7 +2463,7 @@ function go(step) {
   $("#toolhdr").hidden = step === "load"; $("#outliner").hidden = step === "load"; renderOutliner();
   if (step !== "cut") $("#hint").textContent = step === "done" ? "Scene list: the eye on a folder hides everything in it, the eye on a row just that part · Alt+H shows everything" : "Drop a scan on the view, or press Ctrl+O";
   else if (S.T) setMode(S.mode || "pieces");
-  $("#rail").hidden = step !== "cut"; $("#viewTools").hidden = step !== "cut"; $("#editTools").hidden = step !== "cut"; $("#toggles").hidden = step !== "cut"; $("#legend").hidden = step !== "cut"; $("#hud").hidden = step !== "cut";
+  $("#rail").hidden = step !== "cut"; $("#viewTools").hidden = step !== "cut" && step !== "done"; $("#editTools").hidden = step !== "cut"; $("#toggles").hidden = step !== "cut"; $("#legend").hidden = step !== "cut"; $("#hud").hidden = step !== "cut";
   if (step !== "cut") { $("#keys").hidden = true; closeMenu(); }
   $("#labels").hidden = step !== "cut";
   $("#doneTools").hidden = step !== "done"; $("#spreadBox").hidden = step !== "done" || S.show === "plates";
@@ -2860,7 +2863,7 @@ addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", ""));
 // printed holder that twist-locks into the shell's corners. The numbers match
 // the engine's insert.py, so what's shown here is what gets built.
 const INS = { arm_w: 14, arm_t: 6, frame_w: 10, hub_lip: 5, foot_r: 10, post_r: 6, fit: 0.4, flare: 1.5, squeeze: 0.1, tab_len: 10, tab_w: 12, groove_w: 6, peg_inset: 12, slot_margin: 3, taper_deg: 1, least_floor: 3, lip: 4, play: 0.3, air_n: 3, air_d: 4 };
-const insDefaults = () => ({ on: false, shape: "round", w: 90, d: 70, h: 120, wall: 3, round: 6, least: 20, taper: 0, peg_d: 20, cx: null, cy: null, keep: true });
+const insDefaults = () => ({ on: false, shape: "round", w: 90, d: 70, h: 120, wall: 3, round: 6, least: 20, taper: 0, peg_d: 20, cup_wall: 0.56, arm_w: 14, frame_w: 10, arm_t: 6, cx: null, cy: null, keep: true });
 S.insert = insDefaults();
 const insD = (s) => (s.shape === "round" || s.shape === "square" ? s.w : s.d);
 
@@ -2893,6 +2896,8 @@ const polyArea = (pts) => Math.abs(pts.reduce((a, p, i) => { const q = pts[(i + 
 function insPegSize(s) {
   const d = Math.min(30, Math.max(10, +s.peg_d || 20)), r = d / 2;
   INS.foot_r = r; INS.post_r = +(r * 0.6).toFixed(2); INS.flare = Math.min(1.5, 0.15 * r); INS.peg_inset = r + 2;
+  // the holder's arms (from the hub to the corners), the frame between the corners, and how thick they all are
+  INS.arm_w = clamp(+s.arm_w || 14, 4, 40); INS.frame_w = clamp(+s.frame_w || 10, 4, 40); INS.arm_t = clamp(+s.arm_t || 6, 3, 20);
 }
 // The four pegs, where they lock (same as the engine's peg_places). Each turns
 // about the box centre from its entry hole to here, on an arc centred on a spot
@@ -3556,7 +3561,7 @@ $("#insCentre").onclick = () => { if (S.T) { mark(null); insCentreOnOpening(S.T)
 const insSpec = () => {
   if (!S.insert.on || !S.T) return null;
   const L = insLayout(S.insert, S.T);
-  return { shape: S.insert.shape, w: S.insert.w, d: insD(S.insert), h: S.insert.h, wall: S.insert.wall, round: S.insert.round, least: S.insert.least, taper: +S.insert.taper || 0, peg_d: Math.min(30, Math.max(10, +S.insert.peg_d || 20)), cx: L.c[0], cy: L.c[1], spots: null };
+  return { shape: S.insert.shape, w: S.insert.w, d: insD(S.insert), h: S.insert.h, wall: S.insert.wall, round: S.insert.round, least: S.insert.least, taper: +S.insert.taper || 0, peg_d: Math.min(30, Math.max(10, +S.insert.peg_d || 20)), cup_wall: Math.min(5, Math.max(0.3, +S.insert.cup_wall || 0.56)), arm_w: INS.arm_w, frame_w: INS.frame_w, arm_t: INS.arm_t, cx: L.c[0], cy: L.c[1], spots: null };
 };
 // the insert can't go through the latex: say so, and show it, instead of building
 function insPokes() {
@@ -3646,7 +3651,7 @@ window.__ms = { showTab, splitPartOf, SPLIT, SEAM, drawSlicePlan, sliceDragStart
     .replace(/(-?\d+(?:\.\d+)?)((?:\s*×\s*-?\d+(?:\.\d+)?)*)(\s*)mm\b(?![²³23])/g, (m, a, rest, sp) => fmt(a) + rest.replace(num, fmt) + sp + U);
 
   // inputs that hold a length
-  const SEL = '#sizeX, #sizeY, #sizeZ, #spoutD, #spoutH, #trimMm, #insW, #insD, #insH, #insWall, #insRound, #insLeast, #insTaper, #insPeg, input[type=number][id$="_mm"]';
+  const SEL = '#sizeX, #sizeY, #sizeZ, #spoutD, #spoutH, #trimMm, #insW, #insD, #insH, #insWall, #insRound, #insLeast, #insTaper, #insPeg, #insCupWall, #insArmW, #insFrameW, #insArmT, input[type=number][id$="_mm"]';
   const shown = (mm) => String(+(mm / F[U]).toFixed(U === "in" ? 3 : 2));
   function wrap(el) {
     if (el._mm) return;
@@ -3899,6 +3904,7 @@ topMenu("viewMenu", () => [
   { label: "Front", key: "Numpad 1", disabled: S.step === "load", act: () => viewFrom("front") },
   { label: "Side", key: "Numpad 3", disabled: S.step === "load", act: () => viewFrom("side") },
   { label: "Top", key: "Numpad 7", disabled: S.step === "load", act: () => viewFrom("top") },
+  { label: "Bottom", key: "Ctrl+Numpad 7", disabled: S.step === "load", act: () => viewFrom("bottom") },
   { label: "Fit", key: "F", disabled: S.step === "load", act: () => viewFrom("fit") },
   "-",
   { label: ($("#tOver").checked ? "Hide" : "Show") + " overhangs in red", key: "X", disabled: S.step !== "cut", act: () => flip("tOver") },
