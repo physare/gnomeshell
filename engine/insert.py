@@ -32,6 +32,7 @@ DEFAULTS = dict(
     wall=3.0,           # silicone on the sides and the bottom
     round=6.0,          # corner rounding (square, rect)
     least=20.0,         # least concrete between insert and latex
+    taper=0.0,          # degrees per side: the outside narrows toward the far end, so the insert pulls out of the concrete
     cx=None, cy=None,   # centre in the box frame; None = middle of the latex opening
     # printed parts
     arm_w=14.0, arm_t=6.0, frame_w=10.0, hub_lip=5.0,
@@ -59,8 +60,9 @@ def spec_from(d):
         s["d"] = s["w"]
     if s["shape"] == "square":
         s["d"] = s["w"]
-    for k in ("w", "d", "h", "wall", "round", "least"):
+    for k in ("w", "d", "h", "wall", "round", "least", "taper"):
         s[k] = float(s[k])
+    s["taper"] = min(15.0, max(0.0, s["taper"])) if math.isfinite(s["taper"]) else 0.0
     try:
         s["spots"] = [(float(x), float(y)) for x, y in s["spots"]] if s["spots"] else None
         if s["spots"] and (len(s["spots"]) != 4 or not all(math.isfinite(v) for p in s["spots"] for v in p)):
@@ -80,6 +82,14 @@ def check(s):
                            "Make the insert wider or the wall thinner.")
     if s["h"] - s["wall"] < 10:
         raise RuntimeError("The insert is too short for its wall. Make it taller or the wall thinner.")
+    core_far = inner - 2 * _slope(max(s["taper"], s["taper_deg"])) * (s["h"] - s["wall"])
+    if core_far < 6:
+        raise RuntimeError(f"A {s['taper']:g}° taper narrows the insert too much over its {s['h']:g} mm height: "
+                           "the core would come to a point. Use less taper, or make the insert wider or shorter.")
+
+
+def _slope(deg):
+    return math.tan(math.radians(deg))
 
 
 # ------------------------------------------------------------ 2D shapes
@@ -110,19 +120,35 @@ def grown(s, by):
     return outline(shape, s["w"] + 2 * by, s["d"] + 2 * by, max(0.0, r))
 
 
+def ring(s, by, inset=0.0):
+    """The outline grown by `by`, then brought in by `inset` (for the taper,
+    further toward the far end). Always the same number of points for the same
+    `by`, so rings at different depths can be joined up."""
+    shape = s["shape"]
+    w, d = s["w"] + 2 * (by - inset), s["d"] + 2 * (by - inset)
+    if shape in ("square", "rect"):
+        r0 = s["round"] + by
+        r = max(r0 - inset, 0.06) if r0 >= 0.05 else 0.0
+        return outline(shape, w, d, r)
+    return outline(shape, w, d)
+
+
 def area(pts):
     return 0.5 * abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(pts, pts[1:] + pts[:1])))
 
 
 # ------------------------------------------------------------ solids
 
-def _prism(bm, pts, z_lo, z_hi, at=(0.0, 0.0), scale_hi=1.0, mirror_y=False):
+def _prism(bm, pts, z_lo, z_hi, at=(0.0, 0.0), scale_hi=1.0, mirror_y=False, pts_hi=None):
     """A closed prism over a simple outline. The top ring can be scaled about
-    the outline's centre, for a taper."""
+    the outline's centre, or given as its own outline (same number of points),
+    for a taper."""
     ox, oy = at
     sy = -1.0 if mirror_y else 1.0
+    top = pts_hi if pts_hi is not None else [(x * scale_hi, y * scale_hi) for x, y in pts]
+    assert len(top) == len(pts)
     lo = [bm.verts.new((ox + x, oy + sy * y, z_lo)) for x, y in pts]
-    hi = [bm.verts.new((ox + x * scale_hi, oy + sy * y * scale_hi, z_hi)) for x, y in pts]
+    hi = [bm.verts.new((ox + x, oy + sy * y, z_hi)) for x, y in top]
     if mirror_y:
         lo.reverse()
         hi.reverse()
@@ -337,21 +363,30 @@ def layout(s, box):
             R = min(Rs)
     core_h = s["h"] - s["wall"]
     inner_min = min(s["w"], s["d"]) - 2 * s["wall"]
-    taper = max(0.5, 1 - 2 * math.tan(math.radians(s["taper_deg"])) * core_h / inner_min)
+    # the outside narrows by the taper toward the far end; the core by at least
+    # taper_deg, so the holder always slides out of the silicone
+    out_in = _slope(s.get("taper", 0.0)) * s["h"]
+    core_in = _slope(max(s.get("taper", 0.0), s["taper_deg"])) * core_h
+    taper = max(0.05, (inner_min - 2 * core_in) / inner_min)  # the core's far end against its open end, across
     pocket_lo = z0 + s["lip"]  # the seat's top edge at the locked end
     foot_lo = pocket_lo - s["fit"] - s["squeeze"]  # where the head's cone starts: it meets the seat at the slot's edge
     foot_hi = foot_lo + (s["foot_r"] - s["post_r"]) + 2.0
     pocket_hi = foot_hi + s["fit"] + s["play"]
     return dict(z0=z0, bc=bc, c=c, pegs=pegs, R=R, Rs=Rs, theta=theta, hole_r=hole_r, core_h=core_h, taper=taper,
+                out_in=out_in, core_in=core_in,
                 pocket_lo=pocket_lo, pocket_hi=pocket_hi, foot_lo=foot_lo, foot_hi=foot_hi)
+
+
+def _loft_volume(s, by, inset, h):
+    """Volume of the outline grown by `by`, coming in by `inset` over height h
+    (the area is quadratic in the inset, so Simpson's rule is exact)."""
+    return h / 6 * (area(ring(s, by, 0)) + 4 * area(ring(s, by, inset / 2)) + area(ring(s, by, inset)))
 
 
 def silicone_ml(s):
     L = layout(s, (0, 0, 0, 200, 200, 200))
-    outer = area(grown(s, 0)) * s["h"]
-    a1 = area(grown(s, -s["wall"]))
-    a2 = a1 * L["taper"] ** 2
-    core = L["core_h"] / 3 * (a1 + a2 + math.sqrt(a1 * a2))
+    outer = _loft_volume(s, 0, L["out_in"], s["h"])
+    core = _loft_volume(s, -s["wall"], L["core_in"], L["core_h"])
     return (outer - core) / 1000.0
 
 
@@ -408,7 +443,7 @@ def make_holder(s, box, frame4=None):
     _prism(bm, grown(s, s["hub_lip"]), z0 - t, z0, at=c)
     parts.append(bm)
     bm = bmesh.new()  # the core: the inside of the silicone, tapered so the insert slides off
-    _prism(bm, grown(s, -s["wall"]), z0 - 0.5, z0 + L["core_h"], at=c, scale_hi=L["taper"])
+    _prism(bm, ring(s, -s["wall"]), z0 - 0.5, z0 + L["core_h"], at=c, pts_hi=ring(s, -s["wall"], L["core_in"]))
     parts.append(bm)
     for i, p in enumerate(L["pegs"]):  # arms from the hub to each corner, and a frame between the corners
         bm = bmesh.new()
@@ -474,8 +509,8 @@ def make_cup(s, box):
     cup = _union("CUP", parts)
     import mold_shell as ms
     cuts = []
-    bm = bmesh.new()  # the silicone's outside
-    _prism(bm, grown(s, 0), f, rim + 0.01)
+    bm = bmesh.new()  # the silicone's outside: upside down, so its far end (narrowest, with a taper) is at the floor
+    _prism(bm, ring(s, 0, L["out_in"]), f, rim + 0.01, pts_hi=ring(s, 0))
     cuts.append(_obj("ms_tmp_cav", bm))
     bm = bmesh.new()  # room for the hub plate, inside the collar
     _prism(bm, grown(s, lip_in), rim, top + 1)
@@ -495,6 +530,36 @@ def make_cup(s, box):
         ms._remove(o)
     _tidy(cup)
     return cup
+
+
+def make_silicone(s, box):
+    """The cast silicone insert, in the box frame where it hangs on the
+    holder: what comes out of the cup. Its outside, less the core."""
+    import mold_shell as ms
+    L = layout(s, box)
+    z0, c = L["z0"], L["c"]
+    bm = bmesh.new()
+    _prism(bm, ring(s, 0), z0, z0 + s["h"], at=c, pts_hi=ring(s, 0, L["out_in"]))
+    sil = _obj("INSERT", bm)
+    bm = bmesh.new()
+    k = 1.0 / max(L["core_h"], 1e-6)  # start the core 1 mm out, along its own slope, so the open end is clean
+    core_lo = [(x, y) for x, y in ring(s, -s["wall"], -L["core_in"] * k)]
+    _prism(bm, core_lo, z0 - 1.0, z0 + L["core_h"], at=c, pts_hi=ring(s, -s["wall"], L["core_in"]))
+    core = _obj("ms_tmp_core", bm)
+    _bool(sil, [core], "DIFFERENCE")
+    ms._remove(core)
+    _tidy(sil)
+    return sil
+
+
+def cup_matrix(s, box):
+    """From the box frame to the cup's own (as it prints): the holder goes in
+    upside down, so the insert's open end is at the rim and its far end at
+    the cup's floor."""
+    L = layout(s, box)
+    cx, cy = L["c"]
+    top = s["cup_floor"] + s["h"]
+    return Matrix(((1, 0, 0, -cx), (0, -1, 0, cy), (0, 0, -1, top + L["z0"]), (0, 0, 0, 1)))
 
 
 # ------------------------------------------------------------ checks
@@ -557,30 +622,37 @@ def clearances(s, box, R, latex_obj):
 def _insert_samples(s, L, step=4.0):
     """Points over the insert's outside (sides and far end), in the box frame."""
     pts = []
-    ring = grown(s, 0)
-    per = sum(math.dist(a, b) for a, b in zip(ring, ring[1:] + ring[:1]))
+    base = grown(s, 0)
+    per = sum(math.dist(a, b) for a, b in zip(base, base[1:] + base[:1]))
     n_ring = max(24, int(per / step))
-    # resample the outline evenly
-    seg = list(zip(ring, ring[1:] + ring[:1]))
+    cx, cy = L["c"]
+    nz = max(2, int(s["h"] / step))
+    slope = L["out_in"] / s["h"]
+    for i in range(nz + 1):
+        z = L["z0"] + s["h"] * i / nz
+        pts += [(cx + x, cy + y, z) for x, y in _even(ring(s, 0, slope * (z - L["z0"])), n_ring)]
+    # the far end, on a few rings in toward the middle
+    far = _even(ring(s, 0, L["out_in"]), n_ring)
+    for f in (0.75, 0.5, 0.25, 0.0):
+        pts += [(cx + x * f, cy + y * f, L["z0"] + s["h"]) for x, y in far[:: max(1, int(2 / max(f, 0.25)))]]
+    return pts
+
+
+def _even(ring_pts, n):
+    """n points evenly round an outline."""
+    seg = list(zip(ring_pts, ring_pts[1:] + ring_pts[:1]))
     lens = [math.dist(a, b) for a, b in seg]
-    even = []
-    for k in range(n_ring):
-        t = per * k / n_ring
+    per = sum(lens)
+    out = []
+    for k in range(n):
+        t = per * k / n
         for (a, b), ln in zip(seg, lens):
             if t <= ln:
                 u = t / ln if ln else 0
-                even.append((a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u))
+                out.append((a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u))
                 break
             t -= ln
-    cx, cy = L["c"]
-    nz = max(2, int(s["h"] / step))
-    for i in range(nz + 1):
-        z = L["z0"] + s["h"] * i / nz
-        pts += [(cx + x, cy + y, z) for x, y in even]
-    # the far end, on a few rings in toward the middle
-    for f in (0.75, 0.5, 0.25, 0.0):
-        pts += [(cx + x * f, cy + y * f, L["z0"] + s["h"]) for x, y in even[:: max(1, int(2 / max(f, 0.25)))]]
-    return pts
+    return out
 
 
 def mesh_local(obj):

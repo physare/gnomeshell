@@ -205,11 +205,16 @@ USE
          there. Esc goes back to the cuts. It shows
          in blue, with the thinnest spot of concrete marked, and the panel
          says how much silicone to mix. The holder (purple lines) sits on the
-         shell's open face with a peg in each corner. Build shell then makes:
+         shell's open face with a peg in each corner. The corners are
+         numbered 1 to 4 at the pegs, the same numbers the panel's notes use.
+         Taper narrows the insert toward its far end, by that many degrees on
+         every side, so it pulls out of the concrete more easily (1 to 3 is
+         plenty; 0 keeps the sides straight). The cup and the holder's core
+         follow it. Build shell then makes:
            holder.3mf      core (the inside of the silicone) with 3 air
                            holes, hub, arms, four twist-lock pegs and a
                            grooved tab off each corner for a bungee cord
-           insert_cup.3mf  the cup the silicone is cast in
+           insert_cup.3mf  the cup the silicone is cast in (the insert mold)
            and the shell gets a twist-lock slot in each corner of its open face.
          To cast: pour the silicone into the cup, then push the holder's core
          down into it until the hub sits inside the cup's collar. To use: drop
@@ -244,13 +249,19 @@ USE
        plate 1.3mf, plate 2.3mf, ...        the pieces plate by plate, when
                                             they take more than one plate
        holder.3mf, insert_cup.3mf           only with the silicone insert on
+       <scan> - seam card.stl               only with seam cards placed
        preview_with_latex.3mf               everything together, for looking
      The 3MFs come laid out on the plate, each part flat and apart from the
      others, ready to slice. The Plates view (top left, after a build) shows
-     every shell piece, and every part a big piece was split into, set out
-     on plates the size of your printer, as many plates as it takes; each
-     plate is saved as its own 3MF. A piece too big even on its own shows
-     in red on a plate by itself.
+     every printed part, each with its name over it, set out on plates the
+     size of your printer, as many plates as it takes; each plate is saved
+     as its own 3MF. The shell pieces (and every part a big piece was split
+     into), the insert holder, the insert mold and any seam cards share the
+     plates; the test slices get plates of their own (test_slices.3mf), since
+     they're printed first. The insert mold shows with the silicone in it,
+     as it would look poured, and after a build the shell view shows the
+     holder and the silicone insert in place and the mold beside the shell.
+     A part too big even on its own shows in red on a plate by itself.
      A scan with holes in it can't be built: press Repair mesh first. After
      a build, any piece that didn't come out closed is named in red.
 

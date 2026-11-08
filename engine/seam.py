@@ -113,14 +113,22 @@ def card_solid(latex_obj, point, out_dir, top, width=50.0, thick=0.56, gap=0.0, 
     return card, info
 
 
+def flat_matrix(co, out_dir):
+    """4x4: from where the card stands (its points co) to lying on its face on
+    z = 0, for printing."""
+    out, n = _frame(out_dir)
+    R = np.array(n.rotation_difference(Vector((0, 0, -1))).to_matrix())
+    A = np.eye(4)
+    A[:3, :3] = R
+    A[:3, 3] = -(np.asarray(co) @ R.T).min(0)
+    return A
+
+
 def lay_flat(card, out_dir):
     """The card turned to lie on its face, on z = 0, for printing."""
-    out, n = _frame(out_dir)
     co, tris = ms._world_tris(card)
-    R = n.rotation_difference(Vector((0, 0, -1))).to_matrix()
-    pts = np.array(co) @ np.array(R).T
-    pts -= pts.min(0)
-    return pts, tris
+    A = flat_matrix(co, out_dir)
+    return np.asarray(co) @ A[:3, :3].T + A[:3, 3], tris
 
 
 def _perimeter(co, tris, z):

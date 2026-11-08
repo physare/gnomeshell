@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Mold Shell Builder",
     "author": "Gnome and Garden",
-    "version": (0, 13, 6),
+    "version": (0, 13, 7),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar (N) > Mold Shell",
     "description": "Builds a split, 3D-printable mother mold shell around a latex mold scan",
@@ -2555,6 +2555,20 @@ def write_3mf(path, named_meshes, bed_mm=None, arrange=False, keep=False):
     return path
 
 
+def test_flat_basis(obj):
+    """3x3 B: a test slice's points @ B lie it flat (its slice normal up)."""
+    e3 = np.array(obj.get("flat_normal", (0, 0, 1)), dtype=float)
+    e3 /= np.linalg.norm(e3)
+    ex = np.array(obj.get("frame_ex", (1, 0, 0)), dtype=float)
+    up = np.array([0.0, 0.0, 1.0])
+    e2 = up - e3 * up.dot(e3)
+    if np.linalg.norm(e2) < 1e-6:  # level slice: keep the box's own axes
+        e2 = np.cross(e3, ex)
+    e2 /= np.linalg.norm(e2)
+    e1 = np.cross(e2, e3)
+    return np.stack([e1, e2, e3], axis=1)
+
+
 def export_pieces(folder, units="AUTO", latex_obj=None, include_latex_in_3mf=False, bed_mm=None):
     """Write, in millimetres:
       SHELL_n.stl        each shell piece
@@ -2570,16 +2584,7 @@ def export_pieces(folder, units="AUTO", latex_obj=None, include_latex_in_3mf=Fal
         if is_test:
             # lay the slice flat: its slice normal becomes up
             co, tris = _mm_mesh(obj, mm)
-            e3 = np.array(obj.get("flat_normal", (0, 0, 1)), dtype=float)
-            e3 /= np.linalg.norm(e3)
-            ex = np.array(obj.get("frame_ex", (1, 0, 0)), dtype=float)
-            up = np.array([0.0, 0.0, 1.0])
-            e2 = up - e3 * up.dot(e3)
-            if np.linalg.norm(e2) < 1e-6:  # level slice: keep the box's own axes
-                e2 = np.cross(e3, ex)
-            e2 /= np.linalg.norm(e2)
-            e1 = np.cross(e2, e3)
-            B = np.stack([e1, e2, e3], axis=1)
+            B = test_flat_basis(obj)
             co = co @ B
             if np.linalg.det(B) < 0:
                 tris = tris[:, ::-1]

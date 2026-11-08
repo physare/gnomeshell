@@ -1,4 +1,4 @@
 {
-  "version": "0.13.6",
-  "notes": "- Seam cards: a tall card no longer breaks up. The card is now cut round the model with the careful method, so its saved STL is solid all the way up. A card with a stiff edge is made in one piece too. Showing or saving a card takes a few seconds longer."
+  "version": "0.13.7",
+  "notes": "- Insert taper: a new Taper setting on the Insert tab narrows the insert toward its far end, so it pulls out of the concrete more easily. The cup and the holder's core follow it.\n- The insert's corners are numbered 1 to 4 at the pegs, the same numbers the notes use.\n- After a build you see the insert holder and the silicone insert in place, and the insert mold beside the shell with the silicone poured in it.\n- The plates now hold every printed part: the shell, the insert holder, the insert mold and any seam cards. The test slices get plates of their own. Every part has its name over it."
 }

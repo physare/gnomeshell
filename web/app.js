@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.13.6"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.13.7"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -2432,7 +2432,10 @@ function go(step) {
   if (step === "cut" && S.T) refresh();
   else { detachHandle(); groups.planes.visible = groups.regions.visible = groups.arrows.visible = false; }
   const see = step === "done" && S.show === "latex" && !S.build?.slices_only;
-  groups.pieces.children.forEach((m) => { m.material.transparent = see; m.material.opacity = see ? 0.32 : 1; m.material.depthWrite = !see; m.material.needsUpdate = true; });
+  groups.pieces.children.forEach((m) => {
+    const op = m.userData.op ?? 1, o = see ? Math.min(op, 0.32) : op;
+    m.material.transparent = o < 1; m.material.opacity = o; m.material.depthWrite = o >= 1; m.material.needsUpdate = true;
+  });
   if (latexMesh) { latexMesh.material.transparent = step === "done"; latexMesh.material.opacity = step === "done" ? 0.9 : 1; latexMesh.material.depthWrite = true; latexMesh.material.needsUpdate = true; }
   applyInsView();
 }
@@ -2538,7 +2541,7 @@ function startBuild(slicesOnly) {
   const plans = T.slicePlans || slicePlans(T);
   const pieces = T.pieces.map((P, i) => ({ id: P.id, ...pieceSpec(T, P), pull: T.pull[i].toArray(), order: T.order[i], slice: planJSON(plans[i]) }));
   withBusy(slicesOnly ? "Cutting the test slices" : "Building the shell", async () => {
-    const res = await api("/api/build", { cuts, pieces, frame: [T.frame.ex.toArray(), T.frame.ey.toArray()], settings: S.settings, slices_only: !!slicesOnly, insert: slicesOnly ? null : insSpec() });
+    const res = await api("/api/build", { cuts, pieces, frame: [T.frame.ex.toArray(), T.frame.ey.toArray()], settings: S.settings, slices_only: !!slicesOnly, insert: slicesOnly ? null : insSpec(), seam_cards: slicesOnly ? [] : SEAM.cards });
     S.build = res; setShow(res.slices_only ? "latex" : "shell"); await showBuild(res); go("done"); viewFrom("fit");
   }, true);
 }
@@ -2549,26 +2552,31 @@ $("#buildNow").onclick = () => { go("cut"); startBuild(false); };
 async function showBuild(res) {
   groups.pieces.clear(); groups.slices.clear();
   let k = 0;
+  // the insert's parts and the seam cards have their own colours; the silicone is see-through
+  const look = { holder: ["#a77ce8", 1], cup: ["#c9b27a", 1], insert: ["#4f9be0", 0.55], pour: ["#4f9be0", 0.55], seam: ["#a28cf0", 1] };
   for (const p of res.previews) {
     const g = await loadSTL(p.url);
-    const idx = p.test || p.holder ? 0 : k++;
-    const mat = new THREE.MeshStandardMaterial({ color: p.test ? COL.slice : p.holder ? new THREE.Color("#a77ce8") : new THREE.Color(pieceColor(idx)), roughness: 0.6, side: THREE.DoubleSide });
-    const m = new THREE.Mesh(g, mat); m.userData.pull = new V3(...p.pull); m.userData.name = p.name;
-    (p.test ? groups.slices : groups.pieces).add(m);
+    const kind = p.kind || (p.test ? "test" : p.holder ? "holder" : "piece");
+    const [col, op] = look[kind] || [null, 1];
+    const mat = new THREE.MeshStandardMaterial({ color: kind === "test" ? COL.slice : col ? new THREE.Color(col) : new THREE.Color(pieceColor(k++)), roughness: 0.6, side: THREE.DoubleSide,
+      transparent: op < 1, opacity: op, depthWrite: op >= 1 });
+    const m = new THREE.Mesh(g, mat); m.userData.pull = new V3(...p.pull); m.userData.name = p.name; m.userData.kind = kind; m.userData.label = p.label; m.userData.op = op;
+    if (op < 1) m.renderOrder = 2;
+    (kind === "test" ? groups.slices : groups.pieces).add(m);
   }
   spread();
   drawPlates(res);
   const mb = (b) => b > 1e6 ? (b / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1e3)) + " KB";
   const row = (f) => `<div><span></span><span class="mono">${mb(f.size)}</span></div>`;
   const put = (id, list) => { const el = $(id); el.innerHTML = list.map(row).join(""); [...el.children].forEach((d, i) => d.firstChild.textContent = list[i].name); el.previousElementSibling.hidden = el.hidden = !list.length; };
-  const first = res.files.filter((f) => /TEST|test_slices/.test(f.name));
+  const first = res.files.filter((f) => /TEST|test[_ ]slices/.test(f.name));
   const shell = res.files.filter((f) => /^SHELL_\d+[A-Z]?\.stl$|^shell\.3mf$|^plate \d+\.3mf$/.test(f.name));
-  const forIns = res.files.filter((f) => /^(holder|insert_cup)\./.test(f.name));
+  const forIns = res.files.filter((f) => /^(holder|insert_cup)\.| - seam card/.test(f.name));
   const other = res.files.filter((f) => !first.includes(f) && !shell.includes(f) && !forIns.includes(f));
   put("#filesFirst", first); put("#filesShell", shell); put("#filesInsert", forIns); put("#filesOther", other);
   const only = !!res.slices_only;
   $("#doneTools [data-show=shell]").hidden = only;
-  $("#doneTools [data-show=plates]").hidden = only || !(res.plates || []).length;
+  $("#doneTools [data-show=plates]").hidden = !(res.plates || []).length;
   $("#doneTools [data-show=latex]").textContent = only ? "On the latex" : "With latex";
   $("#openBambu").hidden = only; $("#buildNow").hidden = !only;
   $("#shellNext").hidden = !only;
@@ -2604,7 +2612,8 @@ async function showBuild(res) {
     <dt>Silicone to mix</dt><dd>about ${res.insert.silicone_l} L</dd>
     <dt>Holder</dt><dd>${res.insert.holder_mm.join(" × ")} mm</dd>
     <dt>Air holes</dt><dd>${res.insert.air_holes === 1 ? "1 (core too narrow for 3)" : res.insert.air_holes}</dd>
-    <dt>Cup</dt><dd>${res.insert.cup_mm.join(" × ")} mm</dd>` : "");
+    <dt>Insert mold</dt><dd>${res.insert.cup_mm.join(" × ")} mm${res.insert.taper ? `, ${res.insert.taper}° taper` : ""}</dd>` : "") + (res.seam_cards ? `
+    <dt>Seam cards</dt><dd>${res.seam_cards}, on the plate${(res.plates || []).filter((p) => p.kind !== "test").length > 1 ? "s" : ""}</dd>` : "");
   const ord = (res.order || []).filter((o) => o.order);
   const steps = [...new Set(ord.map((o) => o.order))].sort((a, b) => a - b);
   $("#doneOrder").innerHTML = ord.length && steps.length > 1 ? `<h2>Take them off in this order</h2><div class="order">${steps.map((s) =>
@@ -2617,11 +2626,12 @@ function showFolder(path) {
   el.textContent = name ? `Saved in the folder "${name}"` : ""; el.title = path || "";
 }
 // every printed piece on printer plates, side by side, as the engine laid them out
-function textSprite(text, h) {
+function textSprite(text, h, color = "#c9cdd1", bg = null) {
   const c = document.createElement("canvas"), x = c.getContext("2d");
   x.font = "500 64px Inter, sans-serif";
-  c.width = Math.ceil(x.measureText(text).width) + 24; c.height = 88;
-  x.font = "500 64px Inter, sans-serif"; x.fillStyle = "#c9cdd1"; x.textBaseline = "middle"; x.fillText(text, 12, 46);
+  c.width = Math.max(88, Math.ceil(x.measureText(text).width) + (bg ? 48 : 24)); c.height = 88;
+  if (bg) { x.fillStyle = bg; x.beginPath(); x.roundRect(2, 2, c.width - 4, c.height - 4, 40); x.fill(); }
+  x.font = "500 64px Inter, sans-serif"; x.fillStyle = color; x.textBaseline = "middle"; x.textAlign = "center"; x.fillText(text, c.width / 2, 46);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true }));
   s.scale.set(h * c.width / c.height, h, 1); s.renderOrder = 20;
@@ -2632,7 +2642,8 @@ function drawPlates(res) {
   const plates = res.plates || [];
   if (!plates.length) return;
   const [W, D] = res.plate_bed, gap = Math.max(40, W * 0.18);
-  const byName = new Map(groups.pieces.children.map((m) => [m.userData.name, m]));
+  const byName = new Map([...groups.pieces.children, ...groups.slices.children].map((m) => [m.userData.name, m]));
+  let shellNo = 0;
   plates.forEach((pl, k) => {
     // several plates go in rows, so each stays big enough to see
     const cols = Math.ceil(Math.sqrt(plates.length)), g = new THREE.Group();
@@ -2641,18 +2652,23 @@ function drawPlates(res) {
     bed.position.set(W / 2, D / 2, -0.3);
     const edge = new THREE.LineSegments(lineGeometry([new V3(0, 0, 0), new V3(W, 0, 0), new V3(W, 0, 0), new V3(W, D, 0), new V3(W, D, 0), new V3(0, D, 0), new V3(0, D, 0), new V3(0, 0, 0)]),
       new THREE.LineBasicMaterial({ color: "#5d666e" }));
-    const big = pl.items.some((it) => it.too_big);
-    const label = textSprite(`Plate ${k + 1} · ${pl.items.length} ${pl.items.length === 1 ? "piece" : "pieces"}${big ? " · too big" : ""}`, Math.max(10, W * 0.06));
+    const big = pl.items.some((it) => it.too_big), n = pl.items.filter((it) => !it.ghost).length;
+    const nShell = plates.filter((p) => p.kind !== "test").length, nTest = plates.length - nShell;
+    const title = pl.kind === "test" ? `Test slices${nTest > 1 ? ` ${k + 1 - nShell}` : ""}` : `Plate ${++shellNo}`;
+    const label = textSprite(`${title} · ${n} ${n === 1 ? "part" : "parts"}${big ? " · too big" : ""}`, Math.max(10, W * 0.06));
     label.position.set(W / 2, -Math.max(14, W * 0.07), 0);
     g.add(bed, edge, label);
     for (const it of pl.items) {
       const src = byName.get(it.name); if (!src) continue;
       const m = new THREE.Mesh(src.geometry, it.too_big ? new THREE.MeshStandardMaterial({ color: COL.bad, roughness: 0.6, side: THREE.DoubleSide }) : src.material);
       m.matrixAutoUpdate = false; m.matrix.set(...it.matrix);
+      if (it.ghost) m.renderOrder = 2;
       g.add(m);
+      if (it.ghost) continue; // the poured silicone, in its mold: not printed, so no tag of its own
       if (!src.geometry.boundingBox) src.geometry.computeBoundingBox();
       const bb = src.geometry.boundingBox.clone().applyMatrix4(m.matrix), c = bb.getCenter(new V3()), h = Math.max(8, W * 0.045);
-      const tag = textSprite(it.name.replace("SHELL_", ""), h);
+      const text = (it.label || it.name.replace("SHELL_", "")) + (pl.items.some((o) => o.ghost && it.name === "CUP") ? " (silicone shown poured)" : "");
+      const tag = textSprite(text, h, "#e9ecef", "rgba(22,24,26,0.78)");
       tag.position.set(c.x, c.y, bb.max.z + h * 0.8);
       g.add(tag);
     }
@@ -2800,7 +2816,7 @@ addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", ""));
 // printed holder that twist-locks into the shell's corners. The numbers match
 // the engine's insert.py, so what's shown here is what gets built.
 const INS = { arm_w: 14, arm_t: 6, frame_w: 10, hub_lip: 5, foot_r: 10, post_r: 6, fit: 0.4, flare: 1.5, squeeze: 0.1, tab_len: 10, tab_w: 12, groove_w: 6, peg_inset: 12, slot_margin: 3, taper_deg: 1, least_floor: 3, lip: 4, play: 0.3, air_n: 3, air_d: 4 };
-const insDefaults = () => ({ on: false, shape: "round", w: 90, d: 70, h: 120, wall: 3, round: 6, least: 20, cx: null, cy: null, keep: true });
+const insDefaults = () => ({ on: false, shape: "round", w: 90, d: 70, h: 120, wall: 3, round: 6, least: 20, taper: 0, cx: null, cy: null, keep: true });
 S.insert = insDefaults();
 const insD = (s) => (s.shape === "round" || s.shape === "square" ? s.w : s.d);
 
@@ -2818,6 +2834,15 @@ function insOutline(shape, w, d, r, seg = 72) {
   return pts;
 }
 const insGrown = (s, by) => insOutline(s.shape, s.w + 2 * by, insD(s) + 2 * by, (s.shape === "square" || s.shape === "rect") ? Math.max(0, s.round + by) : 0);
+// the outline grown by `by`, then brought in by `inset` (the taper, toward the
+// far end); always the same number of points for the same `by`, so rings at
+// different depths join up (the engine's ring())
+function insRing(s, by, inset = 0) {
+  const w = s.w + 2 * (by - inset), d = insD(s) + 2 * (by - inset);
+  if (s.shape === "square" || s.shape === "rect") { const r0 = s.round + by; return insOutline(s.shape, w, d, r0 >= 0.05 ? Math.max(r0 - inset, 0.06) : 0); }
+  return insOutline(s.shape, w, d, 0);
+}
+const slopeOf = (deg) => Math.tan((+deg || 0) * Math.PI / 180);
 const polyArea = (pts) => Math.abs(pts.reduce((a, p, i) => { const q = pts[(i + 1) % pts.length]; return a + p[0] * q[1] - q[0] * p[1]; }, 0)) / 2;
 
 // The four pegs, where they lock (same as the engine's peg_places). Each turns
@@ -2916,12 +2941,14 @@ function insLayout(s, T) {
   const P = latexTri ? insPegsClear(T) : { ...insPegs(x0, y0, x1, y1), rooms: null, moved: [], shifted: false };
   const { pegs, R, theta } = P, Rs = P.Rs || [R, R, R, R];
   const coreH = s.h - s.wall, innerMin = Math.min(s.w, insD(s)) - 2 * s.wall;
-  const taper = Math.max(0.5, 1 - 2 * Math.tan(INS.taper_deg * Math.PI / 180) * coreH / innerMin);
-  return { z0, bc, c, pegs, R, Rs, theta, coreH, taper, innerMin, rooms: P.rooms, moved: P.moved, spots: P.shifted ? P.spots : null };
+  // the outside comes in by the taper toward the far end; the core by at least 1°, so the holder slides out
+  const outIn = slopeOf(s.taper) * s.h, coreIn = slopeOf(Math.max(+s.taper || 0, INS.taper_deg)) * coreH;
+  const taper = Math.max(0.05, (innerMin - 2 * coreIn) / innerMin);
+  return { z0, bc, c, pegs, R, Rs, theta, coreH, taper, outIn, coreIn, innerMin, rooms: P.rooms, moved: P.moved, spots: P.shifted ? P.spots : null };
 }
 function insSiliconeL(s, L) {
-  const outer = polyArea(insGrown(s, 0)) * s.h, a1 = polyArea(insGrown(s, -s.wall)), a2 = a1 * L.taper * L.taper;
-  return (outer - L.coreH / 3 * (a1 + a2 + Math.sqrt(a1 * a2))) / 1e6;
+  const loft = (by, inset, h) => h / 6 * (polyArea(insRing(s, by)) + 4 * polyArea(insRing(s, by, inset / 2)) + polyArea(insRing(s, by, inset)));
+  return (loft(0, L.outIn, s.h) - loft(-s.wall, L.coreIn, L.coreH)) / 1e6;
 }
 const frameToWorld = (T, x, y, z) => new V3().addScaledVector(T.frame.ex, x).addScaledVector(T.frame.ey, y).addScaledVector(T.frame.ez, z);
 
@@ -2989,17 +3016,22 @@ function insideLatex(q) {
   }
   return n % 2 === 1;
 }
-function insSamples(s, L, step = 5) {
-  const ring = insGrown(s, 0), segs = ring.map((p, i) => [p, ring[(i + 1) % ring.length]]);
-  const lens = segs.map(([a, b]) => Math.hypot(b[0] - a[0], b[1] - a[1])), per = lens.reduce((a, b) => a + b, 0);
-  const nR = Math.max(24, per / step | 0), even = [];
-  for (let k = 0; k < nR; k++) {
-    let t = per * k / nR;
+function insEven(ring, n) { // n points evenly round an outline
+  const segs = ring.map((p, i) => [p, ring[(i + 1) % ring.length]]);
+  const lens = segs.map(([a, b]) => Math.hypot(b[0] - a[0], b[1] - a[1])), per = lens.reduce((a, b) => a + b, 0), even = [];
+  for (let k = 0; k < n; k++) {
+    let t = per * k / n;
     for (let i = 0; i < segs.length; i++) { if (t <= lens[i]) { const u = lens[i] ? t / lens[i] : 0, [a, b] = segs[i]; even.push([a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u]); break; } t -= lens[i]; }
   }
+  return even;
+}
+function insSamples(s, L, step = 5) {
+  const base = insGrown(s, 0), per = base.reduce((a, p, i) => a + Math.hypot(base[(i + 1) % base.length][0] - p[0], base[(i + 1) % base.length][1] - p[1]), 0);
+  const nR = Math.max(24, per / step | 0), slope = L.outIn / s.h;
   const pts = [], nz = Math.max(2, s.h / step | 0);
-  for (let i = 0; i <= nz; i++) for (const [x, y] of even) pts.push([L.c[0] + x, L.c[1] + y, L.z0 + s.h * i / nz]);
-  for (const f of [0.75, 0.5, 0.25, 0]) for (const [x, y] of even.filter((_, i) => i % Math.max(1, Math.round(2 / Math.max(f, 0.25))) === 0)) pts.push([L.c[0] + x * f, L.c[1] + y * f, L.z0 + s.h]);
+  for (let i = 0; i <= nz; i++) { const dz = s.h * i / nz; for (const [x, y] of insEven(insRing(s, 0, slope * dz), nR)) pts.push([L.c[0] + x, L.c[1] + y, L.z0 + dz]); }
+  const far = insEven(insRing(s, 0, L.outIn), nR);
+  for (const f of [0.75, 0.5, 0.25, 0]) for (const [x, y] of far.filter((_, i) => i % Math.max(1, Math.round(2 / Math.max(f, 0.25))) === 0)) pts.push([L.c[0] + x * f, L.c[1] + y * f, L.z0 + s.h]);
   return pts;
 }
 // thinnest concrete between insert and latex, with the holder turned by `angle` from locked
@@ -3014,7 +3046,8 @@ function insThinnest(s, T, angle = 0, stopBelow = -Infinity) {
   }
   return best;
 }
-const insValid = (s) => Math.min(s.w, insD(s)) - 2 * s.wall >= 10 && s.h - s.wall >= 10;
+const insValid = (s) => Math.min(s.w, insD(s)) - 2 * s.wall >= 10 && s.h - s.wall >= 10 &&
+  Math.min(s.w, insD(s)) - 2 * s.wall - 2 * slopeOf(Math.max(+s.taper || 0, INS.taper_deg)) * (s.h - s.wall) >= 6;
 // the spot in the opening farthest from its edge, so the insert has the most room there
 function insCentreOnOpening(T) {
   const L = insLayout(S.insert, T);
@@ -3087,7 +3120,7 @@ function insFill() {
   $("#insDbox").hidden = s.shape === "round" || s.shape === "square";
   $("#insRoundBox").hidden = !(s.shape === "square" || s.shape === "rect");
   const name = { round: "round", oval: "oval", square: "square", rect: "rectangle" }[s.shape];
-  $("#insSum").textContent = s.on ? `${name} ${s.shape === "round" ? "Ø" + s.w : s.w + " × " + insD(s)} × ${s.h} mm` : "off";
+  $("#insSum").textContent = s.on ? `${name} ${s.shape === "round" ? "Ø" + s.w : s.w + " × " + insD(s)} × ${s.h} mm${+s.taper ? `, ${s.taper}° taper` : ""}` : "off";
 }
 function drawInsert(T) {
   dispose(groups.insert); groups.insert.clear();
@@ -3095,11 +3128,16 @@ function drawInsert(T) {
   const kv = $("#insKv");
   if (!S.insert.on || !T) { kv.innerHTML = ""; return; }
   const s = S.insert, L = insLayout(s, T);
-  if (!insValid(s)) { kv.innerHTML = `<dt>Insert</dt><dd class="bad">a ${s.wall} mm wall needs it at least ${Math.ceil(2 * s.wall + 10)} mm across and ${Math.ceil(s.wall + 10)} mm high</dd>`; return; }
+  if (!insValid(s)) {
+    kv.innerHTML = Math.min(s.w, insD(s)) - 2 * s.wall >= 10 && s.h - s.wall >= 10
+      ? `<dt>Insert</dt><dd class="bad">a ${s.taper}° taper over ${s.h} mm brings the core to a point. Use less taper, or make it wider or shorter.</dd>`
+      : `<dt>Insert</dt><dd class="bad">a ${s.wall} mm wall needs it at least ${Math.ceil(2 * s.wall + 10)} mm across and ${Math.ceil(s.wall + 10)} mm high</dd>`;
+    return;
+  }
   const W = (x, y, z) => frameToWorld(T, x, y, z);
   // the insert: blue, see-through
-  const ring = insGrown(s, 0), pos = [];
-  const top = ring.map(([x, y]) => W(L.c[0] + x, L.c[1] + y, L.z0)), far = ring.map(([x, y]) => W(L.c[0] + x, L.c[1] + y, L.z0 + s.h));
+  const ring = insRing(s, 0), pos = [];
+  const top = ring.map(([x, y]) => W(L.c[0] + x, L.c[1] + y, L.z0)), far = insRing(s, 0, L.outIn).map(([x, y]) => W(L.c[0] + x, L.c[1] + y, L.z0 + s.h));
   const mid = W(L.c[0], L.c[1], L.z0 + s.h);
   for (let i = 0; i < ring.length; i++) {
     const j = (i + 1) % ring.length;
@@ -3112,9 +3150,8 @@ function drawInsert(T) {
   const lines = [], add = (a, b) => lines.push(...a.toArray(), ...b.toArray());
   const loop = (pts) => pts.forEach((p, i) => add(p, pts[(i + 1) % pts.length]));
   loop(top); loop(far);
-  const core = insGrown(s, -s.wall);
-  loop(core.map(([x, y]) => W(L.c[0] + x, L.c[1] + y, L.z0)));
-  loop(core.map(([x, y]) => W(L.c[0] + x * L.taper, L.c[1] + y * L.taper, L.z0 + L.coreH)));
+  loop(insRing(s, -s.wall).map(([x, y]) => W(L.c[0] + x, L.c[1] + y, L.z0)));
+  loop(insRing(s, -s.wall, L.coreIn).map(([x, y]) => W(L.c[0] + x, L.c[1] + y, L.z0 + L.coreH)));
   const blue = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(lines.splice(0), 3)), new THREE.LineBasicMaterial({ color: "#7cb8f0" }));
   groups.insert.add(blue);
   const zf = L.z0 - INS.arm_t;
@@ -3128,6 +3165,15 @@ function drawInsert(T) {
     const a = Math.atan2(p[1] - L.bc[1], p[0] - L.bc[0]), arc = [];
     for (let k = 0; k <= 12; k++) { const t = a - L.theta + L.theta * k / 12; arc.push(W(L.bc[0] + L.Rs[i] * Math.cos(t), L.bc[1] + L.Rs[i] * Math.sin(t), L.z0)); }
     arc.slice(1).forEach((q, k) => add(arc[k], q));
+  });
+  // corner numbers, out past each peg's tab: the same numbers the notes below use
+  const tightAt = new Set((L.rooms || []).map((r, i) => (r < 3 ? i : -1)));
+  L.pegs.forEach((p, i) => {
+    const dx = p[0] - L.bc[0], dy = p[1] - L.bc[1], n = Math.hypot(dx, dy) || 1, out = INS.foot_r + 4 + INS.tab_len + 12;
+    const tag = textSprite(String(i + 1), Math.max(9, size() * 0.035), "#16181a", tightAt.has(i) ? "#ff8a6a" : "#f0c060");
+    tag.position.copy(W(p[0] + dx / n * out, p[1] + dy / n * out, zf));
+    tag.userData.cornerTag = i + 1;
+    groups.insert.add(tag);
   });
   groups.insert.add(new THREE.LineSegments(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(lines, 3)), new THREE.LineBasicMaterial({ color: "#b48cf0" })));
   // readouts, and the thinnest spot marked
@@ -3143,7 +3189,7 @@ function drawInsert(T) {
   const lockRoom = L.rooms || [];
   const tight = lockRoom.map((r, i) => [r, i + 1]).filter(([r]) => r < 3);
   const lockNote = tight.length
-    ? `<dt>Lock holes</dt><dd class="bad">corner ${tight.map(([, i]) => i).join(", ")} ${Math.min(...tight.map(([r]) => r)) < 0.5 ? (tight.length > 1 ? "break" : "breaks") + " into the latex" : (tight.length > 1 ? "have" : "has") + " only " + Math.min(...tight.map(([r]) => r)).toFixed(0) + " mm of shell to the latex"}${L.moved.length ? ", even moved in" : ""}. The shell's probably too small for the insert's pegs.</dd>`
+    ? `<dt>Lock holes</dt><dd class="bad">corner ${tight.map(([, i]) => i).join(", ")} ${Math.min(...tight.map(([r]) => r)) < 0.5 ? (tight.length > 1 ? "break" : "breaks") + " into the latex" : (tight.length > 1 ? "have" : "has") + " only " + Math.min(...tight.map(([r]) => r)).toFixed(0) + " mm of shell to the latex"}${L.moved.length ? ", even moved in" : ""}. The shell's probably too small for the insert's pegs. The corners are numbered in the view.</dd>`
     : L.moved.length ? `<dt>Lock holes</dt><dd>corner ${L.moved.join(", ")} moved in to clear the latex</dd>` : "";
   const mm = (v) => (Number.isFinite(v) ? `${v < 0 ? "pokes through by " + (-v).toFixed(0) : v.toFixed(0)} mm` : "–");
   const litres = insSiliconeL(s, L);
@@ -3164,8 +3210,8 @@ function drawInsert(T) {
     const m = new THREE.Mesh(new THREE.SphereGeometry(hs * (insDrag?.kind === kind ? 1.25 : 1), 16, 12), new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.95 }));
     m.position.copy(p); m.renderOrder = 6; m.userData.insHandle = kind; groups.insert.add(m);
   };
-  knob(W(L.c[0] + s.w / 2, L.c[1], midZ), "w", "#ffffff");
-  if (s.shape === "oval" || s.shape === "rect") knob(W(L.c[0], L.c[1] + insD(s) / 2, midZ), "d", "#ffffff");
+  knob(W(L.c[0] + s.w / 2 - L.outIn / 2, L.c[1], midZ), "w", "#ffffff");
+  if (s.shape === "oval" || s.shape === "rect") knob(W(L.c[0], L.c[1] + insD(s) / 2 - L.outIn / 2, midZ), "d", "#ffffff");
   knob(W(L.c[0], L.c[1], L.z0 + s.h), "h", "#ffffff");
   knob(W(L.c[0], L.c[1], L.z0), "move", "#f0c060");
 }
@@ -3226,6 +3272,18 @@ function insSolids(s, L, T) {
     const m = new THREE.Mesh(geo, material); m.position.set(at[0], at[1], z0); return m;
   };
   const prismAt = (pts, z0, z1) => prism(pts, z0, z1, 1, purple, [0, 0]);
+  // a prism whose far ring is its own outline (same number of points): the taper
+  const loft = (ring, ringHi, z0, z1, material) => {
+    const m = prism(ring, z0, z1, 1, material), p = m.geometry.attributes.position, h = z1 - z0;
+    for (let i = 0; i < p.count; i++) {
+      if (p.getZ(i) < h - 1e-6) continue;
+      let k = 0, best = Infinity;
+      ring.forEach(([x, y], j) => { const d = (x - p.getX(i)) ** 2 + (y - p.getY(i)) ** 2; if (d < best) { best = d; k = j; } });
+      p.setX(i, ringHi[k][0]); p.setY(i, ringHi[k][1]);
+    }
+    m.geometry.computeVertexNormals();
+    return m;
+  };
   const rod = (r0, r1, z0, z1, at, material = peg) => {
     const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r0, z1 - z0, 32), material);
     m.rotation.x = Math.PI / 2; m.position.set(at[0], at[1], (z0 + z1) / 2); return m;
@@ -3237,10 +3295,10 @@ function insSolids(s, L, T) {
   };
   const z0 = L.z0, t = INS.arm_t;
   // the silicone: solid-looking blue round the core
-  g.add(prism(insGrown(s, 0), z0, z0 + s.h, 1, mat("#4f9be0", 0.55)));
+  g.add(loft(insRing(s, 0), insRing(s, 0, L.outIn), z0, z0 + s.h, mat("#4f9be0", 0.55)));
   // holder: hub, core, arms, frame, pads, pegs
   g.add(prism(insGrown(s, INS.hub_lip), z0 - t, z0));
-  g.add(prism(insGrown(s, -s.wall), z0 - 0.5, z0 + L.coreH, L.taper));
+  g.add(loft(insRing(s, -s.wall), insRing(s, -s.wall, L.coreIn), z0 - 0.5, z0 + L.coreH, purple));
   const footLo = z0 + INS.lip - INS.fit - INS.squeeze, footHi = footLo + (INS.foot_r - INS.post_r) + 2;
   L.pegs.forEach((p, i) => {
     g.add(bar(L.c, p, INS.arm_w, z0 - t, z0), bar(p, L.pegs[(i + 1) % 4], INS.frame_w, z0 - t, z0));
@@ -3409,7 +3467,7 @@ $("#insCentre").onclick = () => { if (S.T) { mark(null); insCentreOnOpening(S.T)
 const insSpec = () => {
   if (!S.insert.on || !S.T) return null;
   const L = insLayout(S.insert, S.T);
-  return { shape: S.insert.shape, w: S.insert.w, d: insD(S.insert), h: S.insert.h, wall: S.insert.wall, round: S.insert.round, least: S.insert.least, cx: L.c[0], cy: L.c[1], spots: L.spots };
+  return { shape: S.insert.shape, w: S.insert.w, d: insD(S.insert), h: S.insert.h, wall: S.insert.wall, round: S.insert.round, least: S.insert.least, taper: +S.insert.taper || 0, cx: L.c[0], cy: L.c[1], spots: L.spots };
 };
 // the insert can't go through the latex: say so, and show it, instead of building
 function insPokes() {
@@ -3432,7 +3490,7 @@ $("#insOnly").onclick = () => {
 };
 
 // for testing
-window.__ms = { showTab, splitPartOf, SPLIT, curTab, sizerAt, drawSizer, sizerOn, baseH, setBaseH, latexDistance, INS, S, insCentre: (T) => insCentreOnOpening(T), insFit, insAutoFit, insHandleAt, setInsView, insViewOn, insThinnest, insLayout, drawInsert, insSpec, loadRecent, frameGroup, slicePlans, startBuild, pickAt, pieceSpec, refresh, compute, splitPieces, splitNormal, pickAllPieces, mirrorCuts, mirrorPlane, applyLayout, layoutNow, labels: () => labels, renderCuts, camera, groups, removeCut, deleteSegs, deleteCuts, mergePieces, optimize, undo, redo, setMode, selectSeg, selectPiece, selectCut, H, meshes, handle, gizmoT, gizmoR, onHandleMove };
+window.__ms = { showTab, splitPartOf, SPLIT, SEAM, curTab, sizerAt, drawSizer, sizerOn, baseH, setBaseH, latexDistance, INS, S, insCentre: (T) => insCentreOnOpening(T), insFit, insAutoFit, insHandleAt, setInsView, insViewOn, insThinnest, insLayout, drawInsert, insSpec, loadRecent, frameGroup, slicePlans, startBuild, pickAt, pieceSpec, refresh, compute, splitPieces, splitNormal, pickAllPieces, mirrorCuts, mirrorPlane, applyLayout, layoutNow, labels: () => labels, renderCuts, camera, groups, removeCut, deleteSegs, deleteCuts, mergePieces, optimize, undo, redo, setMode, selectSeg, selectPiece, selectCut, H, meshes, handle, gizmoT, gizmoR, onHandleMove };
 
 // ------------------------------------------------------------ tooltips and panels
 // Hover anything with a title (or a ? icon) for a tooltip; long help lives there, not in the panel.
@@ -3499,7 +3557,7 @@ window.__ms = { showTab, splitPartOf, SPLIT, curTab, sizerAt, drawSizer, sizerOn
     .replace(/(-?\d+(?:\.\d+)?)((?:\s*×\s*-?\d+(?:\.\d+)?)*)(\s*)mm\b(?![²³23])/g, (m, a, rest, sp) => fmt(a) + rest.replace(num, fmt) + sp + U);
 
   // inputs that hold a length
-  const SEL = '#sizeX, #sizeY, #sizeZ, #spoutD, #spoutH, #trimMm, #insW, #insD, #insH, #insWall, #insRound, #insLeast, input[type=number][id$="_mm"]';
+  const SEL = '#sizeX, #sizeY, #sizeZ, #spoutD, #spoutH, #trimMm, #insW, #insD, #insH, #insWall, #insRound, #insLeast, #insTaper, input[type=number][id$="_mm"]';
   const shown = (mm) => String(+(mm / F[U]).toFixed(U === "in" ? 3 : 2));
   function wrap(el) {
     if (el._mm) return;

@@ -43,7 +43,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.13.6"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.13.7"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -423,33 +423,101 @@ def _open_edge_count(obj):
     return n
 
 
+def _m4(R=None, t=None):
+    M = np.eye(4)
+    if R is not None:
+        M[:3, :3] = np.asarray(R, float)
+    if t is not None:
+        M[:3, 3] = t
+    return M
+
+
+def _xf(M, co):
+    """4x4 M applied to points co (n x 3)."""
+    return np.asarray(co, float) @ M[:3, :3].T + M[:3, 3]
+
+
+def part_label(name):
+    """What a part is called on the plates and in the plate files."""
+    if name.startswith(ms.PIECE_PREFIX) and name.endswith(ms.TEST_SUFFIX):
+        return "Test slice " + name[len(ms.PIECE_PREFIX):-len(ms.TEST_SUFFIX)]
+    if name.startswith(ms.PIECE_PREFIX):
+        return "Shell " + name[len(ms.PIECE_PREFIX):]
+    if name.startswith("SEAM_CARD_"):
+        return "Seam card " + name[len("SEAM_CARD_"):]
+    return {"HOLDER": "Insert holder", "CUP": "Insert mold", "INSERT": "Silicone insert",
+            "INSERT_POUR": "Silicone insert, poured"}.get(name, name)
+
+
 def _insert_parts(spec, report, folder, bed_mm, latex):
-    """The holder and the cup for a silicone insert, saved next to the shell."""
+    """The holder and the cup (the insert's mold) for a silicone insert, saved
+    next to the shell, and the silicone itself as it would come out of the cup.
+    Returns the holder, its info, and the parts to show: each with its points
+    where it shows in the scan's space and A, the 4x4 from there to how it
+    prints (None for the silicone, which isn't printed)."""
     box = tuple(report["box_frame"])
     R = Matrix(report["frame_R"])
-    frame4 = R.to_4x4()
+    F = np.array(R.to_4x4())  # box frame -> scan
     progress("Making the insert holder")
-    holder = ins.make_holder(spec, box, frame4)
-    progress("Making the cup for the silicone")
+    holder = ins.make_holder(spec, box, R.to_4x4())
+    progress("Making the insert mold")
     cup = ins.make_cup(spec, box)
+    progress("Pouring the silicone (a preview)")
+    sil = ins.make_silicone(spec, box)
+    parts = []
+    # the holder where it locks on; it prints hub down, as made
+    co_w, tris = ms._world_tris(holder)
+    loc = _xf(np.linalg.inv(F), co_w)
+    A_h = _m4(t=(0, 0, -loc[:, 2].min())) @ np.linalg.inv(F)
+    parts.append({"name": "HOLDER", "co": co_w, "tris": tris, "A": A_h, "pull": [0, 0, -1], "kind": "holder"})
+    # the cup stands beside the shell, on the same face; it prints as made
+    x0, y0, z0, x1, y1, z1 = box
+    half = max(spec["w"], spec["d"]) / 2 + spec["hub_lip"] + spec["cup_fit"] + spec["collar_w"]
+    Wc = F @ _m4(t=(x1 + 30 + half, (y0 + y1) / 2, z0))
+    co_c, tris_c = ins.mesh_local(cup)
+    parts.append({"name": "CUP", "co": _xf(Wc, co_c), "tris": tris_c, "A": np.linalg.inv(Wc), "pull": [0, 0, 0], "kind": "cup"})
+    # the silicone: hanging on the holder, and still in the cup as poured
+    co_s, tris_s = ins.mesh_local(sil)
+    parts.append({"name": "INSERT", "co": _xf(F, co_s), "tris": tris_s, "A": None, "pull": [0, 0, -1], "kind": "insert"})
+    parts.append({"name": "INSERT_POUR", "co": _xf(Wc @ np.array(ins.cup_matrix(spec, box)), co_s), "tris": tris_s, "A": None,
+                  "pull": [0, 0, 0], "kind": "pour", "in": "CUP"})
     out = {}
-    for obj, name in ((holder, "holder"), (cup, "insert_cup")):
-        co, tris = ins.mesh_local(obj)
-        co = co - np.array([0, 0, co[:, 2].min()])
-        ms._write_stl(os.path.join(folder, name + ".stl"), co, tris)
-        ms.write_3mf(os.path.join(folder, name + ".3mf"), [(name, co, tris)], bed_mm, arrange=True)
-        span = co.max(0) - co.min(0)
-        out[name] = [round(float(x), 1) for x in span]
-    # previews in scan coordinates: the holder where it locks on, the cup off to the side
-    co, tris = ms._world_tris(holder)
-    ms._write_stl(os.path.join(PREVIEW_DIR, "HOLDER.stl"), co, tris)
+    for p, name in ((parts[0], "holder"), (parts[1], "insert_cup")):
+        co = _xf(p["A"], p["co"])
+        ms._write_stl(os.path.join(folder, name + ".stl"), co, p["tris"])
+        ms.write_3mf(os.path.join(folder, name + ".3mf"), [(part_label(p["name"]), co, p["tris"])], bed_mm, arrange=True)
+        out[name] = [round(float(x), 1) for x in co.max(0) - co.min(0)]
+    for p in parts:
+        ms._write_stl(os.path.join(PREVIEW_DIR, p["name"] + ".stl"), p["co"], p["tris"])
     ms._remove(cup)
+    ms._remove(sil)
     clear = ins.clearances(spec, box, R, latex)
     info = {"holder_mm": out["holder"], "cup_mm": out["insert_cup"], "silicone_l": round(ins.silicone_ml(spec) / 1000, 2),
             "thinnest_mm": clear["thinnest_mm"], "turning_mm": clear["turning_mm"], "lock_room_mm": clear["lock_room_mm"],
             "air_holes": int(holder.get("air_holes", 0)), "lock_channel_gap_mm": report.get("lock_channel_gap_mm"),
+            "taper": spec["taper"],
             "fits_plate": bool(max(out["holder"][:2]) <= bed_mm and max(out["insert_cup"][:2]) <= bed_mm)}
-    return holder, info
+    return holder, info, parts
+
+
+def _seam_parts(cards, folder):
+    """The seam cards for the build: saved laid flat as "<name> - seam card N.stl"
+    (as Save seam card STL does), and the parts to show."""
+    made = _seam_cards(cards)
+    for f in os.listdir(folder):
+        if " - seam card" in f and f.lower().endswith(".stl"):
+            os.remove(os.path.join(folder, f))
+    parts, files = [], []
+    for k, (card, info, c) in enumerate(made, 1):
+        co, tris = ms._world_tris(card)
+        A = seam.flat_matrix(co, info["out"])
+        name = f"{STATE['name']} - seam card {k}.stl" if len(made) > 1 else f"{STATE['name']} - seam card.stl"
+        ms._write_stl(os.path.join(folder, name), _xf(A, co), tris)
+        files.append(name)
+        parts.append({"name": f"SEAM_CARD_{k}", "co": co, "tris": tris, "A": A, "pull": [float(x) for x in info["out"]], "kind": "seam"})
+        ms._write_stl(os.path.join(PREVIEW_DIR, f"SEAM_CARD_{k}.stl"), co, tris)
+        ms._remove(card)
+    return parts, files
 
 
 def job_insert_only(spec_in, cuts, settings, frame=None):
@@ -479,7 +547,7 @@ def job_insert_only(spec_in, cuts, settings, frame=None):
     for f in ("holder.stl", "holder.3mf", "insert_cup.stl", "insert_cup.3mf"):
         if os.path.isfile(os.path.join(folder, f)):
             os.remove(os.path.join(folder, f))
-    holder, info = _insert_parts(spec, report, folder, settings["bed_mm"], latex)
+    holder, info, _ = _insert_parts(spec, report, folder, settings["bed_mm"], latex)
     ms._remove(holder)
     progress("Done")
     files = [{"name": f, "size": os.path.getsize(os.path.join(folder, f))}
@@ -488,7 +556,7 @@ def job_insert_only(spec_in, cuts, settings, frame=None):
             "holder_url": f"/api/preview/HOLDER.stl?t={int(time.time())}"}
 
 
-def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert=None):
+def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert=None, seam_cards=None):
     """Build the shell and its test slices, or with slices_only, just the slices."""
     latex = bpy.data.objects.get(STATE["latex"] or "")
     if latex is None:
@@ -598,8 +666,13 @@ def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert
         if f.lower().endswith((".stl", ".3mf")) and f not in ("scan.stl", "prepared.stl") and not f.endswith(" - model.stl") and " - part " not in f and " - seam card" not in f:
             os.remove(os.path.join(folder, f))
     paths = ms.export_pieces(folder, units="MM", latex_obj=None, bed_mm=settings["bed_mm"])
+    extras, seam_files = [], []
     if kw.get("insert"):
-        holder, insert_info = _insert_parts(kw["insert"], report, folder, settings["bed_mm"], latex)
+        holder, insert_info, extras = _insert_parts(kw["insert"], report, folder, settings["bed_mm"], latex)
+    if seam_cards and not slices_only:
+        progress("Making the seam cards")
+        got, seam_files = _seam_parts(seam_cards, folder)
+        extras += got
     # a viewing copy with the latex in place
     mm = 1.0
     angle = pieces[0].get("box_angle", 0.0) if pieces else 0.0
@@ -608,42 +681,73 @@ def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert
                    [(o.name,) + ms._mm_mesh(o, mm, angle) for o in ms._pieces()]
         ms.write_3mf(os.path.join(folder, "preview_with_latex.3mf"), assembly, settings["bed_mm"])
 
-    # every printed piece set out on printer plates, as many as it takes; a file for each plate
-    plates, plate_files = [], []
-    if not slices_only and ms._pieces():
-        W, D, Hh = _printer(settings)
-        meshes = {o.name: ms._mm_mesh(o, mm, angle) for o in ms._pieces()}
-        plan = ms.plan_plates([(n, m[0]) for n, m in meshes.items()], W, D, Hh)
-        Rb = ms._turn_z(-math.degrees(angle))  # the box lined up with the plate, as _mm_mesh turns it
+    # every printed part set out on printer plates, as many as it takes; a file for each plate.
+    # The shell, the insert holder and mold and the seam cards share plates; the
+    # test slices get their own, since they're printed first.
+    W, D, Hh = _printer(settings)
+    main, tests = [], []  # (name, points as they print, tris, A: scan -> as they print)
+    if not slices_only:
+        Rb = _m4(ms._turn_z(-math.degrees(angle)))  # the box lined up with the plate, as _mm_mesh turns it
+        for o in ms._pieces():
+            co, tris = ms._world_tris(o)
+            main.append((o.name, _xf(Rb, co), tris, Rb))
+        for e in extras:
+            if e["A"] is not None:
+                main.append((e["name"], _xf(e["A"], e["co"]), e["tris"], e["A"]))
+    for o in ms._pieces(tests=True):
+        co, tris = ms._world_tris(o)
+        B = ms.test_flat_basis(o)
+        A = _m4(B.T)
+        if np.linalg.det(B) < 0:
+            tris = tris[:, ::-1]
+        tests.append((o.name, _xf(A, co), tris, A))
+
+    def lay_out(items, kind):
+        if not items:
+            return []
+        got = {n: (co, tris, A) for n, co, tris, A in items}
+        plan = ms.plan_plates([(n, co) for n, co, _, _ in items], W, D, Hh)
+        out = []
         for k, pl in enumerate(plan, 1):
             named = []
             for it in pl:
                 R = ms._turn_z(it["turn"])
-                co, tris = meshes[it["name"]]
-                named.append((it["name"], co @ R.T + np.array(it["off"]), tris))
-                M = np.eye(4)
-                M[:3, :3] = R @ Rb
-                M[:3, 3] = it["off"]
+                co, tris, A = got[it["name"]]
+                placed = co @ R.T + np.array(it["off"])
+                named.append((part_label(it["name"]), placed, tris))
+                M = _m4(R, it["off"]) @ A
                 it["matrix"] = [float(x) for x in M.reshape(-1)]  # scan coordinates to the plate, row by row
-            fname = f"plate {k}.3mf" if len(plan) > 1 else "shell.3mf"  # one plate: shell.3mf is laid out the same way
+                it["label"] = part_label(it["name"])
+            for e in extras:  # the poured silicone shows in its cup
+                cup = next((it for it in pl if it["name"] == e.get("in")), None)
+                if cup:
+                    pl.append({"name": e["name"], "label": part_label(e["name"]), "ghost": True, "matrix": cup["matrix"]})
+            if kind == "test":
+                fname = "test_slices.3mf" if len(plan) == 1 else f"test slices {k}.3mf"
+            else:
+                fname = f"plate {k}.3mf" if len(plan) > 1 else "shell.3mf"  # one plate: shell.3mf is laid out the same way
             ms.write_3mf(os.path.join(folder, fname), named, W, arrange=False, keep=True)
-            if len(plan) > 1:
-                plate_files.append(fname)
-            plates.append({"items": pl, "file": fname})
+            out.append({"items": pl, "file": fname, "kind": kind})
+        return out
+
+    plates = lay_out(main, "shell") + lay_out(tests, "test")
+    plate_files = [p["file"] for p in plates]
 
     # previews for the browser, in scan coordinates
     for f in os.listdir(PREVIEW_DIR):
         if f.startswith(ms.PIECE_PREFIX):
             os.remove(os.path.join(PREVIEW_DIR, f))
     prev = []
+    for e in extras:
+        prev.append({"name": e["name"], "label": part_label(e["name"]), "kind": e["kind"], "test": False, "holder": e["kind"] == "holder",
+                     "url": f"/api/preview/{e['name']}.stl?t={int(time.time())}", "pull": e["pull"], "order": 0, "piece_id": ""})
     if holder is not None:
-        prev.append({"name": "HOLDER", "test": False, "holder": True, "url": f"/api/preview/HOLDER.stl?t={int(time.time())}",
-                     "pull": [0, 0, -1], "order": 0, "piece_id": ""})
         ms._remove(holder)
     for o in ms._pieces() + ms._pieces(tests=True):
         co, tris = ms._world_tris(o)
         ms._write_stl(os.path.join(PREVIEW_DIR, o.name + ".stl"), co, tris)
-        prev.append({"name": o.name, "test": o.name.endswith(ms.TEST_SUFFIX),
+        test = o.name.endswith(ms.TEST_SUFFIX)
+        prev.append({"name": o.name, "label": part_label(o.name), "kind": "test" if test else "piece", "test": test,
                      "url": f"/api/preview/{o.name}.stl?t={int(time.time())}", "pull": list(o.get("pull_direction", (0, 0, 0))),
                      "order": int(o.get("order", 0)), "piece_id": o.get("piece_id", "")})
 
@@ -658,6 +762,7 @@ def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert
         key=lambda f: (not (f["name"].startswith("test_slices") or "_TEST" in f["name"]), f["name"]))
     if not insert_info:
         files = [f for f in files if not f["name"].startswith(("holder", "insert_cup"))]
+    files += [{"name": f, "size": os.path.getsize(os.path.join(folder, f))} for f in seam_files]
     seconds = round(time.time() - t0)
     summary = {
         "name": STATE["name"], "folder": folder, "seconds": seconds,
@@ -677,6 +782,7 @@ def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert
         "slices": [{"name": o.name, "through": o.get("slice_through", "")} for o in ms._pieces(tests=True)],
         "open_pieces": open_pieces,
         "insert": insert_info,
+        "seam_cards": len(seam_files),
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "scan_dims": [round(x, 1) for x in latex.dimensions],
     }
@@ -1547,7 +1653,7 @@ class Handler(BaseHTTPRequestHandler):
                 check_settings(settings)
                 save_settings(settings)
                 return self._send(200, self._busy(job_build, data["cuts"], settings, data.get("pieces"), data.get("frame"),
-                                                  bool(data.get("slices_only")), data.get("insert")))
+                                                  bool(data.get("slices_only")), data.get("insert"), data.get("seam_cards")))
             if p == "/api/insert":
                 settings = load_settings()
                 settings.update({k: data.get("settings", {}).get(k, v) for k, v in settings.items()})
