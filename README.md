@@ -4,11 +4,15 @@ GnomeShell builds 3D-printed mother-mold shells around latex mold scans. It runs
 
 ## Install
 
-1. Click **Code > Download ZIP** on this page, or use the `GnomeShell.zip` you were sent.
-2. Unzip it somewhere it can stay.
-3. Double-click `Make desktop shortcut.bat` once, then start GnomeShell from the shortcut.
+**[Download GnomeShell-Setup.bat](https://github.com/physare/gnomeshell/releases/latest/download/GnomeShell-Setup.bat)** and double-click it. Setup does the following:
 
-`READ ME.txt` covers everything the app does.
+- installs the newest GnomeShell for your Windows user (no administrator rights needed)
+- checks for Blender 5.2, and if it's missing, offers to download and set it up next to GnomeShell (about 400 MB)
+- adds GnomeShell to the desktop and the Start menu, then opens it
+
+Windows may warn that the file isn't commonly downloaded. Choose **Keep**, then **More info > Run anyway**.
+
+To install by hand instead, click **Code > Download ZIP**, unzip it somewhere it can stay, and run `Make desktop shortcut.bat`. You also need [Blender 5.2](https://www.blender.org/download/). `READ ME.txt` covers everything the app does.
 
 ## Updates
 
