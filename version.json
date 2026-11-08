@@ -1,4 +1,4 @@
 {
-  "version": "0.13.5",
-  "notes": "- Silicone insert: GnomeShell won't build while the insert pokes through the latex.\n- Scan tab: one section open at a time, in order of use. The view's checkboxes are in one Show menu.\n- Build screen: With latex shows the shell see-through, Plates looks from higher up with each piece labeled, and the panel waits while a build runs.\n- Clearer names in Settings, US spelling, and better keyboard use, contrast and small-window layout.\n- Safer: only GnomeShell's own window can send it commands."
+  "version": "0.13.6",
+  "notes": "- Seam cards: a tall card no longer breaks up. The card is now cut round the model with the careful method, so its saved STL is solid all the way up. A card with a stiff edge is made in one piece too. Showing or saving a card takes a few seconds longer."
 }

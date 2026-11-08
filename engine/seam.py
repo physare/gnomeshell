@@ -36,6 +36,20 @@ def _box(bm, origin, out, n, a0, a1, z0, z1, c0, c1):
         bm.faces.new([vs[i] for i in f])
 
 
+def _prism(bm, origin, out, n, ac, z0, z1):
+    """A solid standing from z0 to z1 on the outline ac: (a, c) points, a along
+    out, c along n, going round anticlockwise seen from above."""
+    lo = [bm.verts.new(origin + out * a + n * c + EZ * z0) for a, c in ac]
+    hi = [bm.verts.new(origin + out * a + n * c + EZ * z1) for a, c in ac]
+    k = len(ac)
+    for i in range(k):
+        j = (i + 1) % k
+        bm.faces.new([lo[i], lo[j], hi[j], hi[i]])
+    bm.faces.new(hi)
+    bm.faces.new(lo[::-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+
+
 def card_solid(latex_obj, point, out_dir, top, width=50.0, thick=0.56, gap=0.0, rim_w=0.0, rim_t=2.0, name="ms_tmp_card"):
     """The card as a solid, in place against the model. point: where on the
     surface it goes; out_dir: which way it stands out (made level); top: the
@@ -55,15 +69,16 @@ def card_solid(latex_obj, point, out_dir, top, width=50.0, thick=0.56, gap=0.0, 
     a0 = float(np.median(a))  # start from the middle of the model, so the card meets it all the way up
     a0 = min(a0, reach - 1.0)
     a1 = reach + float(gap) + float(width)
-    bm = bmesh.new()
-    _box(bm, origin, out, n, a0, a1, z0, top, -thick / 2, thick / 2)
-    card = ms._new_obj(name, bm)
+    # the card with its stiff edge as one solid: a boolean union of a card this
+    # thin and the edge strip comes out torn
+    t2 = thick / 2
+    ac = [(a0, -t2), (a1, -t2), (a1, t2), (a0, t2)]
     if rim_w > 0 and rim_t > thick:
-        bm = bmesh.new()
-        _box(bm, origin, out, n, a1 - min(rim_w, width), a1, z0, top, -rim_t / 2, rim_t / 2)
-        rim = ms._new_obj("ms_tmp_rim", bm)
-        ms._fast_union(card, rim)
-        ms._remove(rim)
+        ar, r2 = max(a0 + 1.0, a1 - min(rim_w, width)), rim_t / 2
+        ac = [(a0, -t2), (ar, -t2), (ar, -r2), (a1, -r2), (a1, r2), (ar, r2), (ar, t2), (a0, t2)]
+    bm = bmesh.new()
+    _prism(bm, origin, out, n, ac, z0, top)
+    card = ms._new_obj(name, bm)
     # take the model (grown by the gap) out of it, so the inner edge follows the surface
     if gap > 0:
         span = float(np.ptp(co, axis=0).max())
@@ -72,12 +87,14 @@ def card_solid(latex_obj, point, out_dir, top, width=50.0, thick=0.56, gap=0.0, 
         me = latex_obj.data.copy()
         me.transform(latex_obj.matrix_world)
         cutter = ms._new_obj("ms_tmp_cardcut", me)
-    ms._fast_bool(card, cutter, "DIFFERENCE")
+    # the careful (Exact) boolean: the quick one flattens a card this thin into
+    # long triangles that run through it from face to face
+    ms._apply_booleans(card, [cutter], "DIFFERENCE")
     ms._remove(cutter)
     # keep only the card itself: bits left inside hollows of the model go
     bm = bmesh.new()
     bm.from_mesh(card.data)
-    parts = ms._pieces_by_area(bm)
+    parts = [p for _, p in ms._pieces_by_area(bm)]  # (area, faces), biggest first
     if len(parts) > 1:
         def outer(part):
             return max((v.co - origin).dot(out) for f in part for v in f.verts)
@@ -87,7 +104,8 @@ def card_solid(latex_obj, point, out_dir, top, width=50.0, thick=0.56, gap=0.0, 
         loose = [v for v in bm.verts if not v.link_faces]
         if loose:
             bmesh.ops.delete(bm, geom=loose, context="VERTS")
-        bm.to_mesh(card.data)
+    ms._drop_loose_bits(bm)  # and close any pinhole the boolean left
+    bm.to_mesh(card.data)
     bm.free()
     card.data.update()
     info = {"point": [float(x) for x in P], "out": [float(x) for x in out], "top": round(top, 1), "bottom": round(z0, 1),
