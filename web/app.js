@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.14.0"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.14.1"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -2832,7 +2832,7 @@ addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", ""));
 // printed holder that twist-locks into the shell's corners. The numbers match
 // the engine's insert.py, so what's shown here is what gets built.
 const INS = { arm_w: 14, arm_t: 6, frame_w: 10, hub_lip: 5, foot_r: 10, post_r: 6, fit: 0.4, flare: 1.5, squeeze: 0.1, tab_len: 10, tab_w: 12, groove_w: 6, peg_inset: 12, slot_margin: 3, taper_deg: 1, least_floor: 3, lip: 4, play: 0.3, air_n: 3, air_d: 4 };
-const insDefaults = () => ({ on: false, shape: "round", w: 90, d: 70, h: 120, wall: 3, round: 6, least: 20, taper: 0, cx: null, cy: null, keep: true });
+const insDefaults = () => ({ on: false, shape: "round", w: 90, d: 70, h: 120, wall: 3, round: 6, least: 20, taper: 0, peg_d: 20, cx: null, cy: null, keep: true });
 S.insert = insDefaults();
 const insD = (s) => (s.shape === "round" || s.shape === "square" ? s.w : s.d);
 
@@ -2861,6 +2861,11 @@ function insRing(s, by, inset = 0) {
 const slopeOf = (deg) => Math.tan((+deg || 0) * Math.PI / 180);
 const polyArea = (pts) => Math.abs(pts.reduce((a, p, i) => { const q = pts[(i + 1) % pts.length]; return a + p[0] * q[1] - q[0] * p[1]; }, 0)) / 2;
 
+// The pegs' size from the head's diameter (the engine's spec_from does the same)
+function insPegSize(s) {
+  const d = Math.min(30, Math.max(10, +s.peg_d || 20)), r = d / 2;
+  INS.foot_r = r; INS.post_r = +(r * 0.6).toFixed(2); INS.flare = Math.min(1.5, 0.15 * r); INS.peg_inset = r + 2;
+}
 // The four pegs, where they lock (same as the engine's peg_places). Each turns
 // about the box centre from its entry hole to here, on an arc centred on a spot
 // in from the corner, moved in until the whole slot keeps 3 mm of shell
@@ -2912,44 +2917,28 @@ function insSlotRoom(T, bc, spot, R, theta) {
   }
   return least;
 }
-// Pegs that keep clear of the latex: any corner whose slot comes within 3 mm of
-// it is moved in from the corner to where there's the most room. Worked out
-// once per shell box and kept.
+// The pegs at the box's four corners, and how much shell each slot keeps
+// between it and the latex. Worked out once per shell box and peg size.
 let pegCache = null;
 function insPegsClear(T) {
-  const [x0, y0] = T.boxLo, [x1, y1] = T.boxHi, key = [x0, y0, x1, y1, T.boxLo[2]].map((v) => v.toFixed(2)).join(",");
+  const [x0, y0] = T.boxLo, [x1, y1] = T.boxHi, key = [x0, y0, x1, y1, T.boxLo[2], INS.foot_r].map((v) => v.toFixed(2)).join(",");
   if (pegCache && pegCache.key === key && pegCache.tri === latexTri) return pegCache.L;
   const def = insPegs(x0, y0, x1, y1), bc = [(x0 + x1) / 2, (y0 + y1) / 2];
-  const rooms0 = def.spots.map((sp) => insSlotRoom(T, bc, sp, def.R, def.theta));
-  let L = { ...def, Rs: [def.R, def.R, def.R, def.R], rooms: rooms0, moved: [], shifted: false };
-  if (Math.min(...rooms0) < 3) {
-    const corners = [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]];
-    const pick = def.spots.map((sp, i) => {
-      if (rooms0[i] >= 3) return sp;
-      const [cx, cy, sx, sy] = corners[i];
-      let best = null;
-      for (let ex = INS.peg_inset; ex <= INS.peg_inset + 36; ex += 3) for (let ey = INS.peg_inset; ey <= INS.peg_inset + 36; ey += 3) {
-        const c = [cx + sx * ex, cy + sy * ey], R = Math.hypot(c[0] - bc[0], c[1] - bc[1]);
-        const one = def.spots.slice(); one[i] = c;
-        const got = insPegsAt(x0, y0, x1, y1, one, def.theta);
-        if (!got) continue;
-        const room = insSlotRoom(T, bc, c, R, got.theta), shift = Math.hypot(c[0] - sp[0], c[1] - sp[1]);
-        // enough room, moved as little as it can; failing that, the most room there is
-        const score = room >= 3.5 ? 1000 - shift : room;
-        if (!best || score > best.score) best = { c, score };
-      }
-      return best ? best.c : sp;
-    });
-    const got = insPegsAt(x0, y0, x1, y1, pick);
-    if (got) {
-      const rooms = got.spots.map((sp, i) => insSlotRoom(T, bc, sp, got.Rs[i], got.theta));
-      if (Math.min(...rooms) > Math.min(...rooms0)) L = { ...got, rooms, moved: rooms0.map((r, i) => (r < 3 ? i + 1 : 0)).filter(Boolean), shifted: true };
-    }
-  }
+  const L = { ...def, Rs: [def.R, def.R, def.R, def.R], rooms: def.spots.map((sp) => insSlotRoom(T, bc, sp, def.R, def.theta)), moved: [], shifted: false };
   pegCache = { key, tri: latexTri, L };
   return L;
 }
+// The biggest pegs (20 mm heads down to 10) whose slots all keep 3 mm of shell to the latex
+function insFitPegs(T) {
+  for (let d = 20; d >= 10; d--) {
+    S.insert.peg_d = d;
+    const L = insLayout(S.insert, T);
+    if (!L.rooms || Math.min(...L.rooms) >= 3) return d;
+  }
+  return null;
+}
 function insLayout(s, T) {
+  insPegSize(s);
   const [x0, y0, z0] = T.boxLo, [x1, y1] = T.boxHi;
   const bc = [(x0 + x1) / 2, (y0 + y1) / 2];
   // the centre is kept in scan x, y so it stays put if the cuts turn the box
@@ -3096,6 +3085,8 @@ function insCentreOnOpening(T) {
 // concrete all round and nothing rubbing while it turns to lock. The opening
 // is usually what limits the width; the depth comes after.
 function insFit(T) {
+  // a rectangle or oval takes the opening's own shape: width and depth fitted on their own
+  if (S.insert.shape === "rect" || S.insert.shape === "oval") return insFitFree(T);
   // keep the shape's proportions if they fit; if not, try squarer ones
   const s0 = { ...S.insert }, r0 = s0.w / insD(s0);
   for (const r of [...new Set([r0, Math.min(r0, 1.5), 1].map((v) => +v.toFixed(3)))]) {
@@ -3106,6 +3097,25 @@ function insFit(T) {
     if (s0.shape === "round" || s0.shape === "square") break;
   }
   return null;
+}
+function insFitFree(T) {
+  const base = { ...S.insert }, L0 = insLayout(base, T), least = base.least;
+  const good = (s) => insValid(s) && insThinnest(s, T, 0, least).d >= least && insThinnest(s, T, -L0.theta, 0).d >= 0;
+  const m = Math.ceil(2 * base.wall + 10.5);
+  const s = { ...base, w: m, d: m, h: base.wall + 10.5 };
+  if (!good(s)) { S.insertFitFail = { w: m, d: m, thin: insThinnest(s, T).d }; return null; }
+  // as wide as it goes, then as deep, then wider again if the depth left room
+  const grow = (k, top) => {
+    let lo = s[k], hi = top;
+    for (let i = 0; i < 14; i++) { const mid = (lo + hi) / 2; if (good({ ...s, [k]: mid })) lo = mid; else hi = mid; }
+    s[k] = Math.max(m, Math.floor(lo * 0.995));
+  };
+  const span = Math.max(T.boxHi[0] - T.boxLo[0], T.boxHi[1] - T.boxLo[1]);
+  grow("w", span); grow("d", span); grow("w", span);
+  let hLo = s.h, hHi = T.boxHi[2] - T.boxLo[2];
+  for (let i = 0; i < 12; i++) { const mid = (hLo + hHi) / 2; if (good({ ...s, h: mid })) hLo = mid; else hHi = mid; }
+  S.insert.w = s.w; S.insert.d = s.d; S.insert.h = Math.floor(hLo);
+  return S.insert;
 }
 function insFitAt(T) {
   const base = { ...S.insert }, L0 = insLayout(base, T), least = base.least;
@@ -3204,9 +3214,10 @@ function drawInsert(T) {
   }
   const lockRoom = L.rooms || [];
   const tight = lockRoom.map((r, i) => [r, i + 1]).filter(([r]) => r < 3);
+  const worst = tight.length ? Math.min(...tight.map(([r]) => r)) : 0, small = INS.foot_r * 2 <= 10;
   const lockNote = tight.length
-    ? `<dt>Lock holes</dt><dd class="bad">corner ${tight.map(([, i]) => i).join(", ")} ${Math.min(...tight.map(([r]) => r)) < 0.5 ? (tight.length > 1 ? "break" : "breaks") + " into the latex" : (tight.length > 1 ? "have" : "has") + " only " + Math.min(...tight.map(([r]) => r)).toFixed(0) + " mm of shell to the latex"}${L.moved.length ? ", even moved in" : ""}. The shell's probably too small for the insert's pegs. The corners are numbered in the view.</dd>`
-    : L.moved.length ? `<dt>Lock holes</dt><dd>corner ${L.moved.join(", ")} moved in to clear the latex</dd>` : "";
+    ? `<dt>Lock holes</dt><dd class="bad">corner ${tight.map(([, i]) => i).join(", ")} ${worst < 0.5 ? (tight.length > 1 ? "break" : "breaks") + " into the latex" : (tight.length > 1 ? "have" : "has") + " only " + worst.toFixed(0) + " mm of shell to the latex"} with ${INS.foot_r * 2} mm pegs. ${small ? "Even the smallest pegs don't fit: the latex comes too close to the box's corners." : "Press Fit the pegs to make them smaller."} The corners are numbered in the view.</dd>`
+    : "";
   const mm = (v) => (Number.isFinite(v) ? `${v < 0 ? "pokes through by " + (-v).toFixed(0) : v.toFixed(0)} mm` : "–");
   const litres = insSiliconeL(s, L);
   const tooBig = thin.d < s.least, hits = turn.d < 0;
@@ -3479,11 +3490,19 @@ function insFitFailText() {
   return `Even the smallest insert this shape can be with ${s.wall} mm walls (${f.w} mm across) ${thin}, and you want ${s.least} mm. ` +
     "The opening is usually the narrow part. Try a smaller least concrete or a thinner wall.";
 }
+$("#insPegFit").onclick = () => {
+  if (!S.T || !S.insert.on) return;
+  mark(null);
+  const before = S.insert.peg_d, d = insFitPegs(S.T);
+  insFill(); insChanged();
+  if (d == null) toast("Even 10 mm pegs come too close to the latex at a corner: the latex runs too close to the box's corners there.");
+  else toast(d === before ? `The ${d} mm pegs already fit.` : `Pegs sized to ${d} mm, the biggest that fit all four corners.`, true);
+};
 $("#insCentre").onclick = () => { if (S.T) { mark(null); insCentreOnOpening(S.T); insKeepFitted(); insChanged(); } };
 const insSpec = () => {
   if (!S.insert.on || !S.T) return null;
   const L = insLayout(S.insert, S.T);
-  return { shape: S.insert.shape, w: S.insert.w, d: insD(S.insert), h: S.insert.h, wall: S.insert.wall, round: S.insert.round, least: S.insert.least, taper: +S.insert.taper || 0, cx: L.c[0], cy: L.c[1], spots: L.spots };
+  return { shape: S.insert.shape, w: S.insert.w, d: insD(S.insert), h: S.insert.h, wall: S.insert.wall, round: S.insert.round, least: S.insert.least, taper: +S.insert.taper || 0, peg_d: Math.min(30, Math.max(10, +S.insert.peg_d || 20)), cx: L.c[0], cy: L.c[1], spots: null };
 };
 // the insert can't go through the latex: say so, and show it, instead of building
 function insPokes() {
@@ -3573,7 +3592,7 @@ window.__ms = { showTab, splitPartOf, SPLIT, SEAM, curTab, sizerAt, drawSizer, s
     .replace(/(-?\d+(?:\.\d+)?)((?:\s*×\s*-?\d+(?:\.\d+)?)*)(\s*)mm\b(?![²³23])/g, (m, a, rest, sp) => fmt(a) + rest.replace(num, fmt) + sp + U);
 
   // inputs that hold a length
-  const SEL = '#sizeX, #sizeY, #sizeZ, #spoutD, #spoutH, #trimMm, #insW, #insD, #insH, #insWall, #insRound, #insLeast, #insTaper, input[type=number][id$="_mm"]';
+  const SEL = '#sizeX, #sizeY, #sizeZ, #spoutD, #spoutH, #trimMm, #insW, #insD, #insH, #insWall, #insRound, #insLeast, #insTaper, #insPeg, input[type=number][id$="_mm"]';
   const shown = (mm) => String(+(mm / F[U]).toFixed(U === "in" ? 3 : 2));
   function wrap(el) {
     if (el._mm) return;

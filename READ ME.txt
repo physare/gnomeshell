@@ -207,6 +207,12 @@ USE
          says how much silicone to mix. The holder (purple lines) sits on the
          shell's open face with a peg in each corner. The corners are
          numbered 1 to 4 at the pegs, the same numbers the panel's notes use.
+         The pegs always sit at the box's four corners, so the holder is a
+         rectangle. Peg size is the width of each peg's head (20 mm by
+         default, 10 at the least). If a corner's slot comes too close to the
+         latex, press "Fit the pegs" for the biggest pegs that fit all four.
+         A rectangle or oval insert, kept sized to the latex, fits its width
+         and depth to the opening on their own, so it keeps its shape.
          Taper narrows the insert toward its far end, by that many degrees on
          every side, so it pulls out of the concrete more easily (1 to 3 is
          plenty; 0 keeps the sides straight). The cup and the holder's core

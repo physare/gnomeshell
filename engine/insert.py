@@ -32,6 +32,7 @@ DEFAULTS = dict(
     wall=3.0,           # silicone on the sides and the bottom
     round=6.0,          # corner rounding (square, rect)
     least=20.0,         # least concrete between insert and latex
+    peg_d=20.0,         # across each twist-lock peg's head; sets the peg's other sizes (see spec_from)
     taper=0.0,          # degrees per side: the outside narrows toward the far end, so the insert pulls out of the concrete
     cx=None, cy=None,   # centre in the box frame; None = middle of the latex opening
     # printed parts
@@ -63,6 +64,14 @@ def spec_from(d):
     for k in ("w", "d", "h", "wall", "round", "least", "taper"):
         s[k] = float(s[k])
     s["taper"] = min(15.0, max(0.0, s["taper"])) if math.isfinite(s["taper"]) else 0.0
+    # the pegs scale with their head: neck 0.6 of it, root flare up to 1.5 mm, in 2 mm more from the corner
+    try:
+        pd = float(s["peg_d"])
+    except (TypeError, ValueError):
+        pd = 20.0
+    r = min(15.0, max(5.0, pd / 2 if math.isfinite(pd) else 10.0))
+    s["peg_d"], s["foot_r"], s["post_r"] = 2 * r, r, round(r * 0.6, 2)
+    s["flare"], s["peg_inset"] = min(1.5, 0.15 * r), r + 2
     try:
         s["spots"] = [(float(x), float(y)) for x, y in s["spots"]] if s["spots"] else None
         if s["spots"] and (len(s["spots"]) != 4 or not all(math.isfinite(v) for p in s["spots"] for v in p)):
