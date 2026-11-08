@@ -1,4 +1,4 @@
 {
-  "version": "0.10.3",
-  "notes": "- Updating restarts GnomeShell by itself. If it can't, it says so after about 45 seconds instead of waiting."
+  "version": "0.11.0",
+  "notes": "- Gap webs (Scan tab): a thin sheet across gaps like between the legs, so the latex comes out and the web punches out of the concrete.\n- Find gaps looks for them, or Click a gap and click it in the view; it picks the best angle.\n- Turn, Tilt and Thickness settings. Add webs joins them onto the model; Ctrl+Z takes them off."
 }

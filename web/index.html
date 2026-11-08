@@ -223,6 +223,23 @@
               </div>
             </div>
           </details>
+          <details class="group pnl" data-in="scan" data-pnl="webs">
+            <summary><span>Gap webs</span><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="A thin flat sheet across a gap you can see through, like between the legs or between an arm and the body. The latex goes straight across it instead of down into the gap, so the skin comes off, and the concrete gets a thin fin there that you punch out. Find gaps looks all round the model; Click a gap fills the one you click, turned to face it square on. Turn and Tilt change its angle. Add webs joins them onto the model; Ctrl+Z or Reset scan takes them off.">?</span><span class="sum-meta mono" id="webSum"></span></summary>
+            <div class="group-body">
+              <div class="fields">
+                <label for="web_t_mm" title="How thick the sheet is. Thin enough to punch out of the concrete.">Thickness (mm)<input id="web_t_mm" data-set type="number" step="0.1" min="0.2" max="10"></label>
+              </div>
+              <div class="btn-grid">
+                <button type="button" class="btn" id="webFind" title="Look all round the model for gaps you can see through">Find gaps</button>
+                <button type="button" class="btn" id="webPick" title="Then click in the middle of a gap, looking through it">Click a gap</button>
+              </div>
+              <div id="webCards"></div>
+              <div class="btn-grid">
+                <button type="button" class="btn" id="webClear" disabled>Clear</button>
+                <button type="button" class="btn primary" id="webAdd" disabled>Add webs</button>
+              </div>
+            </div>
+          </details>
           <details class="group pnl" data-in="scan" data-pnl="orient" open>
             <summary><span>Orientation</span></summary>
             <div class="group-body">

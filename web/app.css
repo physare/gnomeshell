@@ -398,3 +398,7 @@ h2 { font-size: 11px; margin-top: 4px; }
 .upd-notes { color: var(--muted); font-size: 12.5px; line-height: 1.45; display: flex; flex-direction: column; gap: 2px; }
 .upd-notes div::before { content: "\2022  "; color: var(--faint); }
 .upd-btns { flex: none; display: flex; gap: 6px; align-self: center; }
+.web-card { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 6px; background: var(--card); border: 1px solid var(--line); margin-bottom: 4px; }
+.web-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.web-head .x { width: 24px; height: 24px; }
+.web-head .bad { color: #f08a70; }

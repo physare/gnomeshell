@@ -31,10 +31,9 @@ START
 
 UPDATES
   When GnomeShell opens it checks github.com/physare/gnomeshell for a newer
-  version. If there is one, an Update button shows at the top right: click
-  it and GnomeShell downloads the new version, puts it in this folder and
-  restarts. Your scans and settings are kept. Hover the button to see
-  what's new.
+  version. If there is one, a card at the bottom says what's new: Update
+  downloads it, puts it in this folder and restarts GnomeShell (your scans
+  and settings are kept); Ignore skips that version until the next one.
 
 USE
   1. Drop a latex scan onto the window (or pick a recent one). STL, OBJ,
@@ -108,6 +107,14 @@ USE
          Thickness, Gap to model (0 fits exactly) and a Stiff edge along the
          outer edge are settings. Save seam card STL saves each card laid
          flat as "<name> - seam card.stl" in the scan's folder.
+       - Gap webs (Scan tab): a thin flat sheet across a gap that's closed
+         all round, like between the legs or an arm on the hip, so the
+         latex can be pulled out and the web punched out of the concrete.
+         Find gaps looks for them; Click a gap, then click it in the view,
+         fills it at the angle that covers the most of the gap. Each web has
+         Turn and Tilt sliders; Thickness (1 mm) is shared. It shows in blue;
+         Add webs joins them onto the model and Ctrl+Z takes them off. A gap
+         has to be see-through from some angle to be found.
        - Cuts: the best first cut is found for you. Red areas would catch.
          Click a cut's card to open it. Move it with Turn / Tilt / Position,
          type an exact number in the box beside each slider, or drag the

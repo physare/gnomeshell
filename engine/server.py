@@ -34,6 +34,7 @@ from mathutils import Matrix, Vector  # noqa: E402
 import mold_shell as ms  # noqa: E402
 import insert as ins  # noqa: E402
 import split as sp  # noqa: E402
+import web as gapweb  # noqa: E402
 import seam  # noqa: E402
 
 HOME_DOCS = os.path.join(os.path.expanduser("~"), "Documents")
@@ -41,7 +42,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.10.3"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.11.0"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -66,6 +67,7 @@ DEFAULT_SETTINGS = {
     "seam_gap_mm": 0.0,
     "seam_rim_w_mm": 0.0,
     "seam_rim_t_mm": 2.0,
+    "web_t_mm": 1.0,
     "bottom_trim_mm": ms.DEFAULTS["bottom_trim_mm"],
     "pour_extend_mm": 0.0,
     "pour_flare_deg": 0.0,
@@ -102,6 +104,7 @@ LIMITS = {
     "seam_gap_mm": ("Seam card gap", 0, 5, False),
     "seam_rim_w_mm": ("Stiff edge width", 0, 100, False),
     "seam_rim_t_mm": ("Stiff edge thickness", 0.5, 10, False),
+    "web_t_mm": ("Gap web thickness", 0.2, 10, False),
     "bottom_trim_mm": ("Floor gap", 0, 50, False),
     "pour_extend_mm": ("Pour collar", 0, 200, False),
     "pour_flare_deg": ("Collar flare", 0, 60, False),
@@ -912,6 +915,15 @@ def job_prep(op, value=None):
         if old.users == 0:
             bpy.data.meshes.remove(old)
         _set_spouts(latex, _spouts(latex) + [rec])
+    elif op == "add_webs":
+        for k, (w, t) in enumerate(_web_list((value or {}).get("webs")), 1):
+            progress(f"Joining gap web {k} onto the model")
+            obj, _ = gapweb.add_web(latex, w["point"], float(w["az"]), float(w["tilt"]), t)
+            old = latex.data
+            latex.data = obj.data
+            ms._remove(obj)
+            if old.users == 0:
+                bpy.data.meshes.remove(old)
     elif op == "repair":
         STATE["repair_note"] = _repair(latex)
     elif op == "simplify":
@@ -1096,6 +1108,48 @@ def job_seam_save(cards, open_folder=False):
     if open_folder:
         _show_in_folder(os.path.join(folder, files[0]["file"]))
     return {"files": files, "folder": folder}
+
+
+def _web_list(webs):
+    t = float(load_settings().get("web_t_mm", 1.0))
+    return [(w, float(w.get("thick") or t)) for w in (webs or [])]
+
+
+def job_web_find():
+    progress("Looking for gaps")
+    return {"webs": gapweb.find(_latex(), progress)}
+
+
+def job_web_click(point, look):
+    progress("Finding the best angle for the gap")
+    r = gapweb.best_for_point(_latex(), point, look)
+    if not r:
+        raise RuntimeError("There's no closed-in gap there to fill. Click in the middle of a gap you can see through, "
+                           "like between the legs, with the model turned so you look straight through it.")
+    return r
+
+
+def job_web_preview(webs):
+    """The webs in place, for the view (each one on its own, not joined yet)."""
+    latex = _latex()
+    co_all, tri_all, infos, off = [], [], [], 0
+    for w, t in _web_list(webs):
+        try:
+            obj, info = gapweb.web_solid(latex, w["point"], float(w["az"]), float(w["tilt"]), t)
+        except RuntimeError as e:
+            infos.append({"error": str(e)})
+            continue
+        co, tris = ms._world_tris(obj)
+        ms._remove(obj)
+        co_all.append(co)
+        tri_all.append(tris + off)
+        off += len(co)
+        infos.append(info)
+    STATE["web_rev"] = STATE.get("web_rev", 0) + 1
+    if not co_all:
+        return {"url": None, "webs": infos}
+    ms._write_stl(os.path.join(PREVIEW_DIR, "WEB.stl"), np.vstack(co_all), np.vstack(tri_all))
+    return {"url": f"/api/preview/WEB.stl?rev={STATE['web_rev']}", "webs": infos}
 
 
 def job_spout_preview(v):
@@ -1387,6 +1441,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, res)
             if p == "/api/seam":
                 return self._send(200, self._busy(job_seam_preview, data.get("cards") or []))
+            if p == "/api/web_find":
+                return self._send(200, self._busy(job_web_find))
+            if p == "/api/web_click":
+                return self._send(200, self._busy(job_web_click, data["point"], data["look"]))
+            if p == "/api/web_preview":
+                return self._send(200, self._busy(job_web_preview, data.get("webs") or []))
             if p == "/api/seam_suggest":
                 return self._send(200, self._busy(job_seam_suggest))
             if p == "/api/seam_save":

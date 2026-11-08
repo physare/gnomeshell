@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.10.3"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.11.0"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -79,7 +79,7 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(300, -40
 const fill = new THREE.DirectionalLight(0xffffff, 0.6); fill.position.set(-400, 300, 200); scene.add(fill);
 const grid = new THREE.GridHelper(400, 40, 0x3a4045, 0x2a2f33); grid.rotation.x = Math.PI / 2; scene.add(grid);
 
-const groups = { latex: new THREE.Group(), planes: new THREE.Group(), regions: new THREE.Group(), arrows: new THREE.Group(), pour: new THREE.Group(), pieces: new THREE.Group(), slices: new THREE.Group(), slicePlan: new THREE.Group(), insert: new THREE.Group(), sizer: new THREE.Group(), base: new THREE.Group(), printer: new THREE.Group(), spout: new THREE.Group(), seam: new THREE.Group() };
+const groups = { latex: new THREE.Group(), planes: new THREE.Group(), regions: new THREE.Group(), arrows: new THREE.Group(), pour: new THREE.Group(), pieces: new THREE.Group(), slices: new THREE.Group(), slicePlan: new THREE.Group(), insert: new THREE.Group(), sizer: new THREE.Group(), base: new THREE.Group(), printer: new THREE.Group(), spout: new THREE.Group(), seam: new THREE.Group(), web: new THREE.Group() };
 Object.values(groups).forEach((g) => scene.add(g));
 const handle = new THREE.Object3D(); scene.add(handle);
 // The open cut gets both at once: an arrow along its normal slides it, two
@@ -1800,7 +1800,7 @@ $("#showPrinter").onchange = () => drawPrinter();
 
 function drawSizer() {
   const g = groups.sizer;
-  if (S.scan) { if (SPLIT.for !== S.scan.name) { SPLIT.for = S.scan.name; SPLIT.cuts = []; SPLIT.parts = []; spoutReset(); seamReset(); } renderSplit(); drawPrinter(); drawSpout(); drawSeamVis(); }
+  if (S.scan) { if (SPLIT.for !== S.scan.name) { SPLIT.for = S.scan.name; SPLIT.cuts = []; SPLIT.parts = []; spoutReset(); seamReset(); webReset(); } renderSplit(); drawPrinter(); drawSpout(); drawSeamVis(); drawWebVis(); }
   groups.base.visible = !!(S.step === "cut" && S.scan && curTab() === "scan" && !insViewOn());
   g.clear();
   g.visible = sizerOn();
@@ -2087,6 +2087,87 @@ $("#seamSave").onclick = () => withBusy("Making the seam cards", async () => {
   toast(`Saved ${r.files.map((f) => `${f.file} (${f.size[0]} × ${f.size[1]} mm)`).join(", ")} in the scan's folder, laid flat for printing. The folder is opening.`, true);
 });
 ["seam_w_mm", "seam_t_mm", "seam_gap_mm", "seam_rim_w_mm", "seam_rim_t_mm"].forEach((id) => $("#" + id).addEventListener("change", () => setTimeout(updateSeam, 500)));
+
+// ---- gap webs: thin sheets across see-through gaps, joined onto the model
+var WEB = { picking: false, webs: [] }; // var: drawSizer may run before this line
+let webT = null;
+function renderWebs() {
+  $("#webCards").innerHTML = WEB.webs.map((w, k) => `<div class="web-card" data-k="${k}">
+    <div class="web-head"><span>Web ${k + 1}</span><span class="faint small">${w.err ? `<span class="bad">${w.err}</span>` : w.area ? `${w.area} cm²` : ""}</span><button type="button" class="x" title="Remove this web" aria-label="Remove web ${k + 1}">×</button></div>
+    <label class="slider">Turn<input type="range" data-a="dAz" min="-45" max="45" step="1" value="${w.dAz}"><span class="mono">${w.dAz > 0 ? "+" : ""}${w.dAz}°</span></label>
+    <label class="slider">Tilt<input type="range" data-a="dTilt" min="-45" max="45" step="1" value="${w.dTilt}"><span class="mono">${w.dTilt > 0 ? "+" : ""}${w.dTilt}°</span></label>
+  </div>`).join("");
+  $("#webAdd").disabled = $("#webClear").disabled = !WEB.webs.length;
+  $("#webAdd").textContent = WEB.webs.length > 1 ? `Add ${WEB.webs.length} webs` : "Add web";
+  $("#webSum").textContent = WEB.webs.length ? `${WEB.webs.length} placed` : "";
+}
+const webSpec = (w) => ({ point: w.point, az: w.az + w.dAz, tilt: Math.max(-80, Math.min(80, w.tilt + w.dTilt)) });
+function drawWebVis() { groups.web.visible = !!(S.scan && curTab() === "scan" && S.step === "cut"); }
+function updateWebs() {
+  clearTimeout(webT);
+  webT = setTimeout(async () => {
+    if (!WEB.webs.length) { groups.web.clear(); return; }
+    try {
+      const r = await api("/api/web_preview", { webs: WEB.webs.map(webSpec) });
+      r.webs.forEach((info, k) => { const w = WEB.webs[k]; if (!w) return; w.err = info.error || null; if (info.area) w.area = info.area; });
+      renderWebs();
+      groups.web.clear();
+      if (r.url) {
+        const g = await loadSTL(r.url);
+        groups.web.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: "#5fc7d9", transparent: true, opacity: 0.85, roughness: 0.6, side: THREE.DoubleSide })));
+      }
+      drawWebVis();
+    } catch (e) { if (/Still working/.test(e.message)) updateWebs(); else toast(e.message); }
+  }, 350);
+}
+function webReset() { WEB.webs = []; WEB.picking = false; $("#webPick").classList.remove("on"); $("#webPick").textContent = "Click a gap"; groups.web.clear(); renderWebs(); }
+const addWeb = (r) => WEB.webs.push({ point: r.point, az: r.az, tilt: r.tilt, area: r.area, dAz: 0, dTilt: 0, err: null });
+canvas.addEventListener("pointerdown", (e) => {
+  if (!WEB.picking || !latexMesh || e.button !== 0) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  setRay(e);
+  // the point along the click's line that passes nearest the middle of the model: the gap is there
+  const c = new V3(...S.scan.center), o = ray.ray.origin.clone(), d = ray.ray.direction.clone().normalize();
+  const p = o.clone().add(d.clone().multiplyScalar(c.clone().sub(o).dot(d)));
+  WEB.picking = false; $("#webPick").classList.remove("on"); $("#webPick").textContent = "Click a gap";
+  withBusy("Finding the best angle for the gap", async () => {
+    addWeb(await api("/api/web_click", { point: p.toArray(), look: d.toArray() }));
+    renderWebs(); updateWebs();
+  });
+}, true);
+$("#webPick").onclick = () => {
+  WEB.picking = !WEB.picking;
+  $("#webPick").classList.toggle("on", WEB.picking);
+  $("#webPick").textContent = WEB.picking ? "Click in the gap…" : "Click a gap";
+};
+$("#webFind").onclick = () => withBusy("Looking for gaps", async () => {
+  const r = await api("/api/web_find", {});
+  const fresh = r.webs.filter((w) => !WEB.webs.some((x) => new V3(...x.point).distanceTo(new V3(...w.point)) < 10));
+  if (!fresh.length) { toast(r.webs.length ? "No other gaps found." : "No closed-in gaps found. If there's a gap you can see through, turn the model to look through it and use Click a gap.", true); return; }
+  fresh.forEach(addWeb); renderWebs(); updateWebs();
+  toast(`Found ${fresh.length} gap${fresh.length > 1 ? "s" : ""}, shown in blue. Turn or tilt any of them, remove the ones you don't want, then Add.`, true);
+}, true);
+$("#webCards").addEventListener("input", (e) => {
+  const card = e.target.closest(".web-card"); if (!card || !e.target.dataset.a) return;
+  const w = WEB.webs[+card.dataset.k]; w[e.target.dataset.a] = +e.target.value;
+  e.target.nextElementSibling.textContent = `${w[e.target.dataset.a] > 0 ? "+" : ""}${w[e.target.dataset.a]}°`;
+  updateWebs();
+});
+$("#webCards").addEventListener("click", (e) => {
+  const b = e.target.closest(".x"); if (!b) return;
+  WEB.webs.splice(+b.closest(".web-card").dataset.k, 1); renderWebs(); updateWebs();
+});
+$("#webClear").onclick = () => webReset();
+$("#webAdd").onclick = () => {
+  if (WEB.webs.some((w) => w.err)) { toast("One of the webs can't be made at that angle. Turn it back, or remove it, then Add."); return; }
+  const n = WEB.webs.length;
+  withBusy(n > 1 ? `Joining ${n} gap webs onto the model` : "Joining the gap web onto the model", async () => {
+    const info = await api("/api/prep", { op: "add_webs", value: { webs: WEB.webs.map(webSpec) } });
+    webReset(); await showScan(info, true); drawSizer();
+    toast(`Joined ${n > 1 ? n + " gap webs" : "the gap web"} onto the model. Ctrl+Z takes ${n > 1 ? "them" : "it"} off again.`, true);
+  }, true);
+};
+$("#web_t_mm").addEventListener("change", () => setTimeout(updateWebs, 500));
 
 $("#baseAdd").onclick = () => {
   const v = { height: baseH(), flare: +$("#baseF").value, shape: baseShape(), margin: +$("#baseM").value, reach: +$("#baseR").value, widen: +$("#baseW").value };
