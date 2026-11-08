@@ -402,3 +402,7 @@ h2 { font-size: 11px; margin-top: 4px; }
 .web-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .web-head .x { width: 24px; height: 24px; }
 .web-head .bad { color: #f08a70; }
+.menu-btn { margin-left: 6px; padding: 5px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+.menu-btn:hover, .menu-btn[aria-expanded="true"] { background: #2f3438; color: var(--text); }
+.units-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 2px 12px; }
+.units-row > span { color: var(--muted); font-size: 13px; }

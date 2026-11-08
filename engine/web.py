@@ -17,6 +17,8 @@ import split as sp
 
 EZ = np.array((0.0, 0.0, 1.0))
 MARGIN = 3.0  # how far the web reaches into the model all round, so it joins
+FILL_MM = 60.0  # how far past the see-through part the web may spread to meet the model at its own depth
+FILL_LEAK_MM = 8.0  # how far it spreads when the air at its depth isn't closed in
 
 
 def direction(az, tilt):
@@ -163,6 +165,7 @@ def _gap_at(co, tris, d, cell, point, reach_mm=12.0):
     if not L:
         return 0.0, view, None, s
     hole = lab == L
+    view.lab = lab
     return float(hole.sum()) * cell * cell, view, hole, s
 
 
@@ -281,6 +284,53 @@ def find(latex_obj, progress=None):
     return out
 
 
+def _web_area(view, hole, depth, co, tris):
+    """The cells the web covers. The see-through gap is only where nothing at
+    any depth is in the way; at the web's own depth the model is often further
+    back (a loincloth hanging in front of the crotch, a calf bulging forward),
+    and the web has to go all the way to it or it leaves holes. So: spread from
+    the gap through the air at the web's depth until the model closes it in, then
+    reach MARGIN into the model all round. Returns the mask."""
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    tree = BVHTree.FromPolygons([tuple(v) for v in co], [tuple(t) for t in tris])
+    state = np.zeros(hole.shape, np.int8)  # 0 untested, 1 air, 2 model, at the web's depth
+    state[hole] = 1
+
+    def test(mask):
+        ys, xs = np.nonzero(mask & (state == 0))
+        for j, i in zip(ys, xs):
+            p = Vector(view.point(j, i, depth))
+            hit = tree.find_nearest(p)
+            inside = hit[0] is not None and (p - hit[0]).dot(hit[1]) < 0
+            state[j, i] = 2 if inside else 1
+
+    near = _grow(view.solid, 1)  # the model as seen, closed over hairline cracks as the gap was found
+    outside = ~near & (view.lab == 0)  # open air round the model
+    m = max(1, int(round(MARGIN / view.cell)))
+
+    def spread(limit):
+        reg = hole.copy()
+        for _ in range(limit):
+            front = _grow(reg, 1) & ~reg & near
+            test(front)
+            new = front & (state == 1)
+            if not new.any():
+                return reg, False
+            reg |= new
+            if (_grow(reg, 1) & outside).any():
+                return reg, True  # the air at this depth gets out round the model
+        return reg, True
+
+    reg, leaked = spread(int(FILL_MM / view.cell))
+    if leaked:
+        reg, _ = spread(max(1, int(FILL_LEAK_MM / view.cell)))
+        reg &= ~_grow(outside, 1)
+    edge = _grow(reg, m) & ~reg & view.solid
+    test(edge)
+    return reg | (edge & (state == 2))
+
+
 def _clean(mask):
     """No cells that touch only at a corner (the mesh would pinch there)."""
     for _ in range(20):
@@ -304,13 +354,12 @@ def web_solid(latex_obj, point, az, tilt, thick=1.0, name="ms_tmp_web"):
     depth = _depth(view, hole, s)
     if depth is None:
         raise RuntimeError("Couldn't tell where the gap's edges are.")
-    # reach into the model all round, but only where the model is at the web's depth
+    # out to the model at the web's depth, then into it all round
     m = max(1, int(round(MARGIN / cell)))
-    inside = view.solid & (view.near <= depth + thick) & (view.far >= depth - thick)
-    mask = hole | (_grow(hole, m) & inside)
-    mask = _grow(mask, 1)
+    area = _web_area(view, hole, depth, co, tris)
+    mask = _grow(area, 1)
     mask = ~_grow(~mask, 1)  # close small notches
-    mask = _clean(mask & (hole | _grow(hole, m + 1)))
+    mask = _clean(mask & _grow(area, 1))
     H, W = mask.shape
     ys, xs = np.nonzero(mask)
     # one vertex per used grid corner, on each face of the sheet

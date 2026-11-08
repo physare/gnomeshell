@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GnomeShell</title>
-<link rel="icon" type="image/png" sizes="256x256" href="icon.png?v=0.10.2">
+<link rel="icon" type="image/png" sizes="256x256" href="icon.png?v=0.12.0">
 <link rel="stylesheet" href="app.css">
 <script type="importmap">{"imports":{"three":"./vendor/three.module.min.js"}}</script>
 </head>
@@ -26,12 +26,13 @@
       <img src="logo.png" width="30" height="30" alt="" aria-hidden="true">
       <span>GnomeShell</span>
     </div>
+    <button type="button" class="menu-btn" id="fileMenu" aria-haspopup="menu">File</button>
     <nav class="steps" aria-label="Steps">
       <button class="step" data-step="load" type="button">1 Load scan</button>
       <button class="step" data-step="cut" type="button" disabled>2 Prepare &amp; cut</button>
       <button class="step" data-step="done" type="button" disabled>3 Build</button>
     </nav>
-    <span class="file" id="fileName"></span>
+    <span class="file" id="fileName" data-raw></span>
     <span class="meta mono" id="fileMeta">Starting…</span>
   </header>
 
@@ -91,9 +92,9 @@
       </div>
       <div class="legend" id="legend" hidden>
         <span><i class="sw" style="background:var(--bad)"></i>Faces the wrong way: would catch</span>
-        <span><i class="sw" style="background:var(--latex-soft)"></i>Pulls off cleanly</span>
+        <span><i class="sw" style="background:linear-gradient(90deg,#5fa497 0 25%,#5a8cc4 25% 50%,#957dcb 50% 75%,#c9b45a 75%)"></i>Each piece in its own colour: pulls off cleanly</span>
         <span id="legSlice" hidden><i class="sw" style="background:var(--plan)"></i>Where the test slices are cut</span>
-        <span class="hint" id="hint">Pieces: click a piece · Shift-click for more · right-click for options · drag an arrow tip to change how it pulls off</span>
+        <span class="hint" id="hint">Pieces: click the model to pick a piece · Shift-click for more · right-click for options · drag an arrow tip to change how it pulls off</span>
       </div>
       <div class="labels" id="labels"></div>
       <div class="toolbar tr ins-bar" id="insViewBar" hidden>
@@ -362,6 +363,14 @@
           </details>
 
           <h2 class="settings-head" data-in="settings">Settings</h2>
+          <div class="units-row" data-in="settings">
+            <span>Show sizes in</span>
+            <div class="seg" role="group" aria-label="Units shown">
+              <button type="button" data-units="mm">mm</button>
+              <button type="button" data-units="cm">cm</button>
+              <button type="button" data-units="in">inches</button>
+            </div>
+          </div>
           <details class="group" data-in="settings">
             <summary><span>Pour collar</span><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="Carries the mold's base opening straight down so the shell leaves room to pour.">?</span><span class="sum-meta mono" id="sumPour"></span></summary>
             <div class="group-body">

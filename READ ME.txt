@@ -29,6 +29,10 @@ START
      window says it's talking to an older copy, close it, end blender.exe in
      Task Manager if it's there, and start GnomeShell again.
 
+UNITS
+  Settings > Show sizes in: mm, cm or inches. Every size you see or type
+  is in that unit; the files are always in mm.
+
 UPDATES
   When GnomeShell opens it checks github.com/physare/gnomeshell for a newer
   version. If there is one, a card at the bottom says what's new: Update
@@ -36,7 +40,8 @@ UPDATES
   and settings are kept); Ignore skips that version until the next one.
 
 USE
-  1. Drop a latex scan onto the window (or pick a recent one). STL, OBJ,
+  1. Drop a latex scan onto the window (or pick a recent one). Later, File
+     at the top left (or Ctrl+O) opens another scan or a recent one. STL, OBJ,
      PLY and .blend files all open. From a .blend, every visible object
      comes in as it looks in Blender (modifiers applied), joined into one
      model. If the .blend won't open, export an STL or OBJ from Blender.
@@ -119,7 +124,10 @@ USE
          Turn and Tilt sliders; Thickness (1 mm) is shared. It shows in blue;
          Add webs joins them onto the model and Ctrl+Z takes them off. A gap
          has to be see-through from some angle to be found.
-       - Cuts: the best first cut is found for you. Red areas would catch.
+       - Cuts: the best first cut is found for you. Each piece shows in its
+         own colour on the model; red areas would catch. Click the model to
+         pick a piece. Only the cut you're working on shows its plane (Lines
+         mode shows them all).
          Click a cut's card to open it. Move it with Turn / Tilt / Position,
          type an exact number in the box beside each slider, or drag the
          handle in the view: the arrow slides the cut, the two rings turn and

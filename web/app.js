@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.11.1"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.12.0"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -57,7 +57,7 @@ const COL = {
   slice: new THREE.Color("#e3a33c"), plane: new THREE.Color("#e3a33c"), pick: new THREE.Color("#fff1d6"),
   plan: new THREE.Color("#ff4fd8"),
 };
-const PIECE_COLORS = ["#5fa497", "#5a8cc4", "#957dcb", "#cc7f9c", "#84ab58", "#4fb3c9", "#8592a1", "#b9735a", "#a3a04e", "#b072b5"];
+const PIECE_COLORS = ["#5fa497", "#5a8cc4", "#957dcb", "#c9b45a", "#84ab58", "#4fb3c9", "#8592a1", "#6e78d6", "#a3a04e", "#b072b5"];
 const pieceColor = (i) => PIECE_COLORS[i % PIECE_COLORS.length];
 const ordinal = (n) => n + (["th", "st", "nd", "rd"][(n % 100 - 20) % 10] || ["th", "st", "nd", "rd"][n % 100] || "th");
 let shiftDown = false;
@@ -359,8 +359,18 @@ function paint(T) {
   const colors = latexMesh.geometry.attributes.color.array;
   const show = $("#tOver").checked && S.cuts.length && !insViewOn();
   const base = insViewOn() ? COL.ghost : COL.latex;
+  // each piece in its own colour on the model; with some picked, the rest fade
+  const byPiece = S.step === "cut" && $("#tPieces").checked && S.cuts.length && !insViewOn() && T.pieces.length > 1;
+  const anySel = S.selPieces.size > 0;
+  const pc = byPiece ? T.pieces.map((P, k) => {
+    const c = new THREE.Color(pieceColor(k)).lerp(COL.latex, 0.2);
+    return anySel && !S.selPieces.has(P.id) ? c.lerp(COL.ghost, 0.65) : c;
+  }) : null;
+  const badDim = COL.bad.clone().lerp(COL.ghost, 0.65);
   for (let i = 0; i < latexTri.n; i++) {
-    const col = show && T.badTri[i] ? COL.bad : base;
+    const k = T.pieceOf ? T.pieceOf[i] : -1;
+    const faded = pc && anySel && k >= 0 && !S.selPieces.has(T.pieces[k].id);
+    const col = show && T.badTri[i] ? (faded ? badDim : COL.bad) : pc && k >= 0 ? pc[k] : base;
     colors[i * 9] = colors[i * 9 + 3] = colors[i * 9 + 6] = col.r;
     colors[i * 9 + 1] = colors[i * 9 + 4] = colors[i * 9 + 7] = col.g;
     colors[i * 9 + 2] = colors[i * 9 + 5] = colors[i * 9 + 8] = col.b;
@@ -586,7 +596,8 @@ function drawSlicePlan(T) {
     const line = new THREE.Mesh(gl, new THREE.MeshBasicMaterial({ color: COL.plan, side: THREE.DoubleSide, transparent: true, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 }));
     const ids = idx.map((i) => T.pieces[i].id);
     sheet.userData = { pieces: ids, part: "sheet" }; edge.userData = { pieces: ids, part: "edge" }; line.userData = { pieces: ids, part: "line" };
-    groups.slicePlan.add(sheet, edge, line);
+    groups.slicePlan.add(line); // only the line on the model: a sheet out past it is one plane too many
+    sheet.geometry.dispose(); edge.geometry.dispose();
   }
   highlight();
 }
@@ -609,20 +620,21 @@ function highlight() {
   for (const [key, o] of meshes.segs) {
     const picked = S.selSegs.has(key), hov = S.hover && S.hover.kind === "seg" && S.hover.key === key;
     const ofCut = o.cut === activeCut || S.selCuts.has(o.cut);
+    const all = S.mode === "lines"; // picking lines: show every plane
     o.m.material.color.copy(picked ? COL.pick : COL.plane);
-    o.m.material.opacity = picked ? 0.42 : hov ? 0.34 : ofCut ? 0.28 : 0.13;
+    o.m.material.opacity = picked ? 0.42 : hov ? 0.34 : ofCut ? 0.22 : all ? 0.13 : 0;
     o.e.material.color.copy(picked ? COL.pick : COL.plane);
-    o.e.material.opacity = picked || hov ? 1 : ofCut ? 0.95 : 0.55;
+    o.e.material.opacity = picked || hov ? 1 : ofCut ? 0.8 : all ? 0.55 : 0;
   }
   const anyPiece = S.selPieces.size > 0;
   for (const [id, o] of meshes.pieces) {
     const sel = S.selPieces.has(id), hov = S.hover && S.hover.kind === "piece" && S.hover.key === id;
-    o.m.material.opacity = sel ? 0.16 : hov ? 0.1 : 0.04;
-    o.e.material.opacity = sel || hov ? 0.95 : anyPiece ? 0.1 : 0.3;
+    o.m.material.opacity = sel ? 0.1 : hov ? 0.06 : 0;
+    o.e.material.opacity = sel ? 0.7 : hov ? 0.45 : 0;
   }
   if (anyPiece) for (const [key, o] of meshes.segs) {
     if (S.selSegs.has(key) || o.cut === activeCut || S.selCuts.has(o.cut)) continue;
-    o.m.material.opacity = 0.05; o.e.material.opacity = 0.2;
+    o.m.material.opacity = S.mode === "lines" ? 0.05 : 0; o.e.material.opacity = S.mode === "lines" ? 0.2 : 0;
   }
   for (const o of groups.slicePlan.children) {
     const on = !anyPiece || (o.userData.pieces || []).some((id) => S.selPieces.has(id));
@@ -1182,6 +1194,11 @@ function pickAt(e, kind) {
     return hit ? { kind: "seg", key: hit.object.userData.seg } : null;
   }
   if (!$("#tPieces").checked) return null;
+  const onModel = latexMesh && S.T && S.T.pieceOf ? ray.intersectObject(latexMesh, false)[0] : null;
+  if (onModel && onModel.faceIndex != null) {
+    const k = S.T.pieceOf[onModel.faceIndex];
+    if (k >= 0 && S.T.pieces[k]) return { kind: "piece", key: S.T.pieces[k].id };
+  }
   const hit = ray.intersectObjects([...meshes.pieces.values()].map((o) => o.pick), false)[0];
   return hit ? { kind: "piece", key: hit.object.userData.piece } : null;
 }
@@ -1191,7 +1208,7 @@ function setMode(m) {
   $$("#editTools [data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
   $("#hint").textContent = m === "lines" ?
     "Lines: click a line between pieces · Shift-click for more · Delete removes it · double-click picks the whole cut · right-click for options" :
-    "Pieces: click a piece · Shift-click for more · right-click for options · drag an arrow tip to change how it pulls off";
+    "Pieces: click the model to pick a piece · Shift-click for more · right-click for options · drag an arrow tip to change how it pulls off";
   S.hover = null; highlight();
 }
 let drag = null, down = null, hoverT = null;
@@ -1282,8 +1299,8 @@ function openMenu(x, y, items) {
   m.style.top = Math.max(8, Math.min(y + 2, innerHeight - r.height - 8)) + "px";
   m.querySelector("button:not(:disabled)")?.focus();
 }
-function closeMenu() { $("#ctx").hidden = true; }
-addEventListener("pointerdown", (e) => { if (!e.target.closest("#ctx")) closeMenu(); }, true);
+function closeMenu() { $("#ctx").hidden = true; $("#ctx").classList.remove("file-menu"); }
+addEventListener("pointerdown", (e) => { if (!e.target.closest("#ctx") && !e.target.closest("#fileMenu")) closeMenu(); }, true);
 addEventListener("resize", closeMenu);
 // the browser's own menu never shows over ours (on Windows it fires after the
 // button comes up, over whatever is under the mouse by then, often our menu);
@@ -1429,7 +1446,7 @@ function fillSettings() {
   const ss = S.settings, set = (id, t) => { const el = $(id); if (el) el.textContent = t; };
   set("#sumPour", +ss.pour_extend_mm ? `${ss.pour_extend_mm} mm` : "off");
   set("#sumShell", hug ? `hugs the latex · ${+ss.contour_mm} mm` : `box · ${+ss.wall_mm} mm wall`);
-  set("#sumChan", hug ? `Ø${ss.hole_d_mm} cord · notches every ${+ss.notch_gap_mm} mm` : +ss.holes_per_corner ? `Ø${ss.hole_d_mm} · ${ss.holes_per_corner}/corner${ss.channel_pairs ? " · pairs" : ""}` : "none");
+  set("#sumChan", hug ? `Ø${ss.hole_d_mm} mm cord · notches every ${+ss.notch_gap_mm} mm` : +ss.holes_per_corner ? `Ø${ss.hole_d_mm} mm · ${ss.holes_per_corner}/corner${ss.channel_pairs ? " · pairs" : ""}` : "none");
   set("#sumSlice", `${ss.test_slice_style === "VERTICAL" ? "upright" : "level"} · ${ss.test_slice_mm} mm`);
   set("#sumPrinter", `${ss.bed_mm} × ${ss.bed_d_mm ?? ss.bed_mm} × ${ss.bed_h_mm} mm`);
   const p = `${S.settings.bed_mm},${S.settings.bed_d_mm ?? S.settings.bed_mm},${S.settings.bed_h_mm}`;
@@ -2162,7 +2179,14 @@ $("#webAdd").onclick = () => {
   if (WEB.webs.some((w) => w.err)) { toast("One of the webs can't be made at that angle. Turn it back, or remove it, then Add."); return; }
   const n = WEB.webs.length;
   withBusy(n > 1 ? `Joining ${n} gap webs onto the model` : "Joining the gap web onto the model", async () => {
-    const info = await api("/api/prep", { op: "add_webs", value: { webs: WEB.webs.map(webSpec) } });
+    clearTimeout(webT); // no new preview; wait out one that's still running
+    let info = null;
+    for (let k = 0; ; k++) {
+      try { info = await api("/api/prep", { op: "add_webs", value: { webs: WEB.webs.map(webSpec) } }); break; } catch (e) {
+        if (!/Still working/.test(e.message) || k > 120) throw e;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
     webReset(); await showScan(info, true); drawSizer();
     toast(`Joined ${n > 1 ? n + " gap webs" : "the gap web"} onto the model. Ctrl+Z takes ${n > 1 ? "them" : "it"} off again.`, true);
   }, true);
@@ -2208,7 +2232,7 @@ function showTab(t) {
 }
 $$("#ptabs [data-tab]").forEach((b) => b.onclick = () => showTab(b.dataset.tab));
 function paintTabs() {
-  const d = S.scan ? $("#sizeSum").textContent.match(/[\d.]+/g) : null;
+  const d = S.scan ? modelDims() : null; // from the numbers, not the text (that may be in cm or inches)
   $("#tabScan").textContent = d && d.length >= 3 ? `${Math.round(+d[2])} mm tall` : "";
   $("#tabCuts").textContent = S.T ? `${S.T.pieces.length} piece${S.T.pieces.length === 1 ? "" : "s"}` : "";
   $("#tabInsert").textContent = S.insert?.on ? "on" : "off";
@@ -2271,6 +2295,32 @@ function grownNote(info) {
   toast(`This scan came in only ${+(+info.grown.was).toPrecision(2)} mm across, so it was probably saved in metres or another unit. ` +
     `GnomeShell made it ${info.grown.factor}× bigger: it's now ${fmtDims(info.size || info.dims)} mm. If that isn't right, type the real size under Size.`, true);
 }
+async function openRecent(name) {
+  await withBusy("Loading scan", async () => {
+    const info = await api("/api/load_recent", { name });
+    S.build = null; groups.pieces.clear(); groups.slices.clear();
+    go("cut"); await showScan(info, false, true); viewFrom("fit");
+    if (info.grown) grownNote(info);
+  });
+}
+async function fileMenu() {
+  const b = $("#fileMenu"), r = b.getBoundingClientRect();
+  const list = (await api("/api/recent").catch(() => null)) || [];
+  const here = S.scan && S.scan.name;
+  const items = [{ label: "Open scan…", key: "Ctrl+O", act: () => $("#fileInput").click() }];
+  const recent = list.filter((x) => x.name !== here).slice(0, 8);
+  if (recent.length) {
+    items.push("-");
+    recent.forEach((x) => items.push({ label: x.name, act: () => openRecent(x.name) }));
+  }
+  items.push("-", { label: "Show this scan's folder", disabled: !here, act: () => api("/api/open", { what: "folder" }).catch((e) => toast(e.message)) });
+  openMenu(r.left, r.bottom + 2, items);
+  $("#ctx").classList.add("file-menu");
+}
+$("#fileMenu").onclick = (e) => { e.stopPropagation(); if (!$("#ctx").hidden && $("#ctx").classList.contains("file-menu")) { closeMenu(); return; } fileMenu(); };
+addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") { e.preventDefault(); $("#fileInput").click(); }
+});
 async function loadRecent() {
   const list = await api("/api/recent").catch(() => null);
   const box = $("#recent");
@@ -2860,7 +2910,7 @@ function drawInsert(T) {
   const tooBig = thin.d < s.least, hits = turn.d < 0;
   const most = tooBig && s.keep && S.insertRelaxed && thin.d >= S.insertRelaxed.least - 0.5;
   kv.innerHTML = `
-    <dt>Thinnest concrete</dt><dd class="${most ? "warn" : tooBig ? "bad" : "good"}">about ${mm(thin.d)}${most ? `, the most this opening allows (want ${s.least})` : tooBig ? ` (want ${s.least})` : ""}</dd>
+    <dt>Thinnest concrete</dt><dd class="${most ? "warn" : tooBig ? "bad" : "good"}">about ${mm(thin.d)}${most ? `, the most this opening allows (want ${s.least} mm)` : tooBig ? ` (want ${s.least} mm)` : ""}</dd>
     <dt>While turning to lock</dt><dd class="${hits ? "bad" : ""}">${hits ? "rubs the latex" : "about " + mm(turn.d)}</dd>
     <dt>Silicone to mix</dt><dd>about ${litres.toFixed(2)} L</dd>
     <dt>To lock</dt><dd>turn ${Math.round(L.theta * 180 / Math.PI)}° clockwise</dd>
@@ -3173,4 +3223,105 @@ window.__ms = { showTab, curTab, sizerAt, drawSizer, sizerOn, baseH, setBaseH, l
     if (key in st) d.open = !!st[key];
     d.addEventListener("toggle", () => { st[key] = d.open; try { localStorage.setItem("gs.panels", JSON.stringify(st)); } catch (e) { /* not kept */ } });
   });
+})();
+
+// Units shown: everything inside stays in mm. Inputs that hold a length show
+// it in the chosen unit (and hand back mm to the code), and any "12 mm" in
+// the page's text is shown as cm or inches. "Scan was saved in" is separate:
+// that's about the file.
+(() => {
+  const F = { mm: 1, cm: 10, in: 25.4 };
+  let U = "mm";
+  try { U = localStorage.getItem("gs.units") || "mm"; } catch (e) { /* default */ }
+  if (!F[U]) U = "mm";
+  const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+  const num = /-?\d+(?:\.\d+)?/g;
+  const fmt = (s) => {
+    const v = parseFloat(s) / F[U], a = Math.abs(v);
+    return String(+v.toFixed(U === "in" ? (a < 1 ? 3 : 2) : (a < 1 ? 2 : 1)));
+  };
+  const conv = (s) => U === "mm" ? s : s
+    .replace(/\(mm\)/g, `(${U})`)
+    .replace(/(-?\d+(?:\.\d+)?)((?:\s*×\s*-?\d+(?:\.\d+)?)*)(\s*)mm\b(?![²³23])/g, (m, a, rest, sp) => fmt(a) + rest.replace(num, fmt) + sp + U);
+
+  // inputs that hold a length
+  const SEL = '#sizeX, #sizeY, #sizeZ, #spoutD, #spoutH, #trimMm, #insW, #insD, #insH, #insWall, #insRound, #insLeast, input[type=number][id$="_mm"]';
+  const shown = (mm) => String(+(mm / F[U]).toFixed(U === "in" ? 3 : 2));
+  function wrap(el) {
+    if (el._mm) return;
+    el._mm = { min: el.getAttribute("min"), max: el.getAttribute("max"), step: el.getAttribute("step") };
+    const raw = desc.get.call(el); // in mm until now
+    Object.defineProperty(el, "value", {
+      configurable: true,
+      get() {
+        const raw = desc.get.call(this);
+        if (U === "mm" || raw === "") return raw;
+        if (this._mmLast && raw === this._mmLast.shown) return this._mmLast.mm; // no drift from rounding
+        const n = parseFloat(raw);
+        return isFinite(n) ? String(+(n * F[U]).toFixed(4)) : raw;
+      },
+      set(v) {
+        const n = parseFloat(v);
+        if (U === "mm" || v === "" || v == null || !isFinite(n)) { this._mmLast = null; desc.set.call(this, v); return; }
+        const s = shown(n);
+        this._mmLast = { mm: String(v), shown: s };
+        desc.set.call(this, s);
+      },
+    });
+    if (raw !== "") el.value = raw;
+    attrs(el);
+  }
+  function attrs(el) {
+    for (const a of ["min", "max"]) {
+      const o = el._mm[a];
+      if (o == null) continue;
+      el.setAttribute(a, U === "mm" ? o : shown(+o));
+    }
+    if (el._mm.step != null) el.setAttribute("step", U === "mm" ? el._mm.step : "any");
+  }
+
+  // text: remember each text node's mm wording, show it converted
+  const orig = new WeakMap();
+  const skip = (n) => { const p = n.parentElement; return !p || p.closest("script, style, textarea, [data-raw], .seg[aria-label='Scan units']"); };
+  function doNode(n) {
+    if (skip(n)) return;
+    let o = orig.get(n);
+    if (o == null || (n.data !== o.out)) { o = { src: n.data, out: null }; orig.set(n, o); }
+    const out = conv(o.src);
+    o.out = out;
+    if (n.data !== out) n.data = out;
+  }
+  function walk(root) {
+    if (root.nodeType === 1) { if (root.matches(SEL)) wrap(root); root.querySelectorAll(SEL).forEach(wrap); }
+    if (root.nodeType === 3) { if (/mm/.test(root.data) || orig.has(root)) doNode(root); return; }
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) if (/mm/.test(n.data) || orig.has(n)) doNode(n);
+  }
+  const mo = new MutationObserver((recs) => {
+    mo.disconnect();
+    for (const r of recs) {
+      if (r.type === "characterData") walk(r.target);
+      else r.addedNodes.forEach((n) => walk(n));
+    }
+    watch();
+  });
+  const watch = () => mo.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+  function apply() {
+    $$(SEL).forEach(wrap);
+    mo.disconnect();
+    walk(document.body);
+    watch();
+    $$("[data-units]").forEach((b) => b.classList.toggle("on", b.dataset.units === U));
+  }
+  $$("[data-units]").forEach((b) => b.onclick = () => {
+    const vals = new Map();
+    $$(SEL).forEach((el) => vals.set(el, el.value)); // mm, read with the old unit
+    U = b.dataset.units;
+    try { localStorage.setItem("gs.units", U); } catch (e) { /* not kept */ }
+    vals.forEach((v, el) => { el.value = v; attrs(el); });
+    apply();
+  });
+  window.__units = { get: () => U, conv };
+  apply();
 })();

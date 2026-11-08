@@ -1,4 +1,4 @@
 {
-  "version": "0.11.1",
-  "notes": "- A scan that comes in only a few millimetres across (saved in metres from Blender, say) is scaled up to a sensible size when it opens, and GnomeShell tells you by how much.\n- Reopening a scan that was stuck at the tiny size fixes it too."
+  "version": "0.12.0",
+  "notes": "- Pieces show in their own colours on the model, and only the cut you're working on shows its plane. Click the model to pick a piece.\n- File menu at the top left (Ctrl+O): open another scan or a recent one.\n- Settings > Show sizes in: mm, cm or inches.\n- Gap webs now reach all the way to the model, so no holes where they meet the legs."
 }
