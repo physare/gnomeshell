@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Mold Shell Builder",
     "author": "Gnome and Garden",
-    "version": (0, 13, 0),
+    "version": (0, 13, 1),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar (N) > Mold Shell",
     "description": "Builds a split, 3D-printable mother mold shell around a latex mold scan",

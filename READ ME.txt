@@ -19,7 +19,8 @@ START
   2. Double-click "Make desktop shortcut.bat" once.
   3. Double-click the GnomeShell shortcut. GnomeShell opens in its own
      window (it uses Microsoft Edge to draw the screen, so it needs no
-     other install). It opens full screen: F11 switches between full
+     other install). A loading screen shows straight away while Blender
+     starts, then turns into the app. It opens full screen: F11 switches between full
      screen and a normal window, and Alt+F4 closes it. Closing the window
      quits GnomeShell.
      If Blender isn't found, put the path to blender.exe in blender_path.txt.

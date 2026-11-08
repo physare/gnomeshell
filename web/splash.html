@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GnomeShell</title>
+<link rel="icon" type="image/png" href="icon.png">
+<style>
+  /* Shown the moment the shortcut is clicked, while Blender starts the engine.
+     Opened from the disk, so it checks for the engine by loading a picture from
+     it, then hands this same window over to the app. */
+  @font-face { font-family: "Inter"; font-weight: 400; src: url("vendor/fonts/inter-400.woff2") format("woff2"); }
+  @font-face { font-family: "Inter"; font-weight: 500; src: url("vendor/fonts/inter-500.woff2") format("woff2"); }
+  :root { color-scheme: dark; }
+  html, body { height: 100%; margin: 0; }
+  body { background: #16181a; color: #e8e6e1; font: 400 14px/1.4 "Inter", "Segoe UI", system-ui, sans-serif;
+         display: flex; align-items: center; justify-content: center; user-select: none; }
+  .box { display: flex; flex-direction: column; align-items: center; gap: 18px; width: min(360px, 80vw); text-align: center; }
+  img { width: 112px; height: 112px; animation: rise 0.5s ease-out both; }
+  h1 { margin: 0; font-weight: 500; font-size: 28px; letter-spacing: -0.01em; animation: rise 0.5s 0.08s ease-out both; }
+  .bar { position: relative; width: 220px; height: 3px; border-radius: 3px; background: #2d3236; overflow: hidden; margin-top: 6px; }
+  .bar::after { content: ""; position: absolute; top: 0; bottom: 0; width: 38%; border-radius: 3px; background: #e3a33c; animation: slide 1.3s ease-in-out infinite; }
+  #msg { color: #a3aaaf; font-size: 13px; min-height: 2.8em; }
+  #msg.bad { color: #f08a70; }
+  @keyframes slide { 0% { left: -38%; } 100% { left: 100%; } }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { img, h1 { animation: none; } .bar::after { animation-duration: 3s; } }
+</style>
+</head>
+<body>
+<div class="box" role="status" aria-live="polite">
+  <img src="logo.png" alt="">
+  <h1>GnomeShell</h1>
+  <div class="bar" aria-hidden="true"></div>
+  <div id="msg">Starting…</div>
+</div>
+<script>
+(() => {
+  const ports = [8765, 8766, 8767, 8768, 8769];
+  const t0 = Date.now(), msg = document.getElementById("msg");
+  let done = false;
+  const words = [[0, "Starting…"], [4000, "Starting Blender, which does the 3D work…"], [15000, "Still starting. The first time after an update can take a little longer."]];
+  function tick() {
+    if (done) return;
+    const s = Date.now() - t0;
+    if (s > 90000) {
+      msg.className = "bad";
+      msg.textContent = "GnomeShell is taking too long to start. Close this window and try again. If it keeps happening, the log is in %TEMP%\\GnomeShell.log.";
+    } else msg.textContent = words.filter((w) => s >= w[0]).pop()[1];
+    // the engine is up once a picture it serves loads
+    ports.forEach((port) => {
+      const img = new Image();
+      img.onload = () => { if (done) return; done = true; msg.textContent = "Opening…"; location.replace(`http://127.0.0.1:${port}/`); };
+      img.src = `http://127.0.0.1:${port}/icon.png?probe=${Date.now()}`;
+    });
+    setTimeout(tick, 500);
+  }
+  tick();
+})();
+</script>
+</body>
+</html>

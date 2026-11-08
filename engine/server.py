@@ -42,7 +42,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.13.0"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.13.1"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -1582,8 +1582,8 @@ def _app_browser():
 def open_window(url):
     """Open the app in its own window: no tabs or address bar, its own
     taskbar button. Returns the window's process so we can tell when it closes."""
-    if os.environ.get("MOLDSHELL_NO_BROWSER"):
-        return None
+    if os.environ.get("MOLDSHELL_NO_BROWSER") or os.environ.get("GNOMESHELL_SPLASH"):
+        return None  # GNOMESHELL_SPLASH: the shortcut already opened the window, on the loading screen
     exe = _app_browser()
     if exe:
         profile = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "GnomeShell", "window")  # its own window profile, so Edge shows the GnomeShell icon

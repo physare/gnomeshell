@@ -1,4 +1,4 @@
 {
-  "version": "0.13.0",
-  "notes": "- New Plates view after Build shell: every piece, and every part a big piece is split into, set out on plates the size of your printer, as many as it takes.\n- Each plate is saved as its own 3MF (plate 1.3mf, plate 2.3mf...) ready for the slicer."
+  "version": "0.13.1",
+  "notes": "- A loading screen shows the moment you click the GnomeShell icon, while Blender starts, then turns into the app."
 }
