@@ -41,7 +41,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.10.0"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.10.1"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -1460,7 +1460,7 @@ def open_window(url):
         return None
     exe = _app_browser()
     if exe:
-        profile = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "MoldShell", "window")
+        profile = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "GnomeShell", "window")  # its own window profile, so Edge shows the GnomeShell icon
         os.makedirs(profile, exist_ok=True)
         flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
         return subprocess.Popen([exe, f"--app={url}", f"--user-data-dir={profile}", "--start-fullscreen",
