@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.13.7"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.13.8"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -1385,6 +1385,7 @@ const KEYS = [
   ["Ctrl+Z", "Undo"], ["Ctrl+Y or Ctrl+Shift+Z", "Redo"],
   ["Delete", "Remove the picked lines or cuts, or join the picked pieces"], ["Esc", "Clear the picks, close a menu, stop optimizing"],
   ["P / L", "Pick pieces / pick lines in the view"], ["Shift+click", "Pick more than one"], ["Ctrl+A", "Pick every piece"],
+  ["C", "Add a cut through the whole shell"], ["S", "Scale box: drag a gold corner to size the scan"], ["R / Shift+R", "Turn the scan 90° / 15° around Z"],
   ["Drag the arrow", "Slide the open cut"], ["Drag a ring", "Turn or tilt the open cut"], ["Shift while dragging", "Snap to 5° or 5%"],
   ["← →", "On a slider: 1° or 1% (Shift: 5)"], ["O", "Optimize the open cut"], ["M", "Join the picked pieces"],
   ["F", "Fit the view"], ["Numpad 1 / 3 / 7", "Front / side / top view"], ["1 / 2 / 3 / 4", "Scan / Cuts / Insert / Settings tab"], ["I", "Insert view, when the insert is on"], ["?", "Show these keys"],
@@ -1432,6 +1433,9 @@ addEventListener("keydown", (e) => {
     p: () => setMode("pieces"), l: () => setMode("lines"),
     o: () => S.active != null && optimize(S.active, ["az", "tilt", "pos"]),
     m: () => mergePieces([...S.selPieces]), f: () => viewFrom("fit"),
+    c: () => { showTab("cuts"); $("#addCut").click(); },
+    s: () => showTab("scan"),
+    r: () => $(e.shiftKey ? '[data-rot="z,15"]' : '[data-rot="z,90"]').click(),
     "?": () => { $("#keys").hidden = !$("#keys").hidden; },
   }[e.key === "?" ? "?" : k];
   if (act) { e.preventDefault(); act(); }
