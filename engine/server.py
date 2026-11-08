@@ -42,7 +42,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.12.0"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.13.0"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -605,6 +605,29 @@ def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert
                    [(o.name,) + ms._mm_mesh(o, mm, angle) for o in ms._pieces()]
         ms.write_3mf(os.path.join(folder, "preview_with_latex.3mf"), assembly, settings["bed_mm"])
 
+    # every printed piece set out on printer plates, as many as it takes; a file for each plate
+    plates, plate_files = [], []
+    if not slices_only and ms._pieces():
+        W, D, Hh = _printer(settings)
+        meshes = {o.name: ms._mm_mesh(o, mm, angle) for o in ms._pieces()}
+        plan = ms.plan_plates([(n, m[0]) for n, m in meshes.items()], W, D, Hh)
+        Rb = ms._turn_z(-math.degrees(angle))  # the box lined up with the plate, as _mm_mesh turns it
+        for k, pl in enumerate(plan, 1):
+            named = []
+            for it in pl:
+                R = ms._turn_z(it["turn"])
+                co, tris = meshes[it["name"]]
+                named.append((it["name"], co @ R.T + np.array(it["off"]), tris))
+                M = np.eye(4)
+                M[:3, :3] = R @ Rb
+                M[:3, 3] = it["off"]
+                it["matrix"] = [float(x) for x in M.reshape(-1)]  # scan coordinates to the plate, row by row
+            fname = f"plate {k}.3mf" if len(plan) > 1 else "shell.3mf"  # one plate: shell.3mf is laid out the same way
+            ms.write_3mf(os.path.join(folder, fname), named, W, arrange=False, keep=True)
+            if len(plan) > 1:
+                plate_files.append(fname)
+            plates.append({"items": pl, "file": fname})
+
     # previews for the browser, in scan coordinates
     for f in os.listdir(PREVIEW_DIR):
         if f.startswith(ms.PIECE_PREFIX):
@@ -641,6 +664,7 @@ def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert
         "shell_style": "CONTOUR" if contour else "BOX",
         "notches": report.get("notches", 0), "bumps": report.get("bumps", 0),
         "split_pieces": split_pieces,
+        "plates": plates, "plate_bed": list(_printer(settings)),
         "box_mm": dims, "fits_plate": bool(dims and (sp.fits(dims, _printer(settings))[0] or (not slices_only and pieces and all(
             sp.fits([float(x) for x in np.ptp(ms._mm_mesh(o, mm, angle)[0], axis=0)], _printer(settings))[0] for o in pieces)))),
         "files": files, "previews": prev,

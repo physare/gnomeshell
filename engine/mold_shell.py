@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Mold Shell Builder",
     "author": "Gnome and Garden",
-    "version": (0, 12, 0),
+    "version": (0, 13, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar (N) > Mold Shell",
     "description": "Builds a split, 3D-printable mother mold shell around a latex mold scan",
@@ -2263,14 +2263,90 @@ def arrange_on_plate(named_meshes, bed_mm, gap=8.0):
     return [(n, v + off, t) for n, v, t in out], fits
 
 
-def write_3mf(path, named_meshes, bed_mm=None, arrange=False):
+def _turn_z(deg):
+    a = math.radians(deg)
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+
+
+def plan_plates(items, bed_w, bed_d, bed_h=None, gap=6.0, margin=0.0):
+    """Every piece set down on printer plates, as many plates as it takes.
+    items: (name, verts_mm) as they print (upright, box lined up with the
+    plate). Each piece may be turned about the vertical to fit (square on
+    first, then whatever angle makes it fit). Pieces go biggest first into
+    rows on the first plate with room, the rows of each plate centred.
+    Returns a list of plates; each plate a list of
+    {"name", "turn" (degrees about Z), "off" (mm, after turning), "dims", "too_big"}."""
+    W, D = bed_w - 2 * margin, bed_d - 2 * margin
+    sized = []
+    for name, v in items:
+        v = np.asarray(v, float)
+        best = None
+        for deg in [0, 90] + list(range(5, 90, 5)):
+            p = v @ _turn_z(deg).T
+            w, d = float(np.ptp(p[:, 0])), float(np.ptp(p[:, 1]))
+            if w < d and w <= D and d <= W:  # wide side along the plate's width packs rows better
+                deg, p, w, d = deg + 90, v @ _turn_z(deg + 90).T, d, w
+            fits = w <= W and d <= D
+            score = (not fits, deg not in (0, 90, 180, 270) and fits, w * d)
+            if best is None or score < best[0]:
+                best = (score, deg % 360, w, d, fits)
+        _, deg, w, d, fits = best
+        tall = bed_h is not None and float(np.ptp(v[:, 2])) > bed_h
+        sized.append({"name": name, "turn": deg, "w": w, "d": d, "fits": fits and not tall, "tall": tall, "v": v})
+    sized.sort(key=lambda s: (-s["d"], -s["w"]))
+    plates = []  # each: {"rows": [[y, h, x]], "y": next free y, "items": []}
+    for it in sized:
+        w, d = it["w"], it["d"]
+        spot = None
+        if it["fits"]:
+            for pl in [q for q in plates if not q.get("closed")]:
+                for row in pl["rows"]:
+                    if row[2] + w <= W + 1e-6 and d <= row[1] + 1e-6:
+                        spot = (pl, row[2], row[0]); row[2] += w + gap
+                        break
+                if spot:
+                    break
+                if pl["y"] + d <= D + 1e-6:
+                    pl["rows"].append([pl["y"], d, w + gap])
+                    spot = (pl, 0.0, pl["y"]); pl["y"] += d + gap
+                    break
+        if not spot:
+            pl = {"rows": [[0.0, d, w + gap]], "y": d + gap, "items": [], "closed": not it["fits"]}  # too big: a plate of its own
+            plates.append(pl)
+            spot = (pl, 0.0, 0.0)
+        pl, x, y = spot
+        pl["items"].append((it, x, y))
+    out = []
+    for pl in plates:
+        # centre what's on the plate
+        xs = [x + it["w"] for it, x, y in pl["items"]]
+        ys = [y + it["d"] for it, x, y in pl["items"]]
+        cx = (bed_w - max(xs)) / 2 if max(xs) <= bed_w else margin
+        cy = (bed_d - max(ys)) / 2 if max(ys) <= bed_d else margin
+        rec = []
+        for it, x, y in pl["items"]:
+            p = it["v"] @ _turn_z(it["turn"]).T
+            lo = p.min(0)
+            off = np.array([cx + x - lo[0], cy + y - lo[1], -lo[2]])
+            rec.append({"name": it["name"], "turn": it["turn"], "off": [float(a) for a in off],
+                        "dims": [round(it["w"], 1), round(it["d"], 1), round(float(np.ptp(p[:, 2])), 1)],
+                        "too_big": bool(not it["fits"] or it["tall"])})
+        out.append(rec)
+    return out
+
+
+def write_3mf(path, named_meshes, bed_mm=None, arrange=False, keep=False):
     """named_meshes: list of (name, verts_mm, tris). Each becomes its own
     object. arrange=False keeps them in place relative to each other (an
     assembly to look at), centred on the plate; arrange=True sets each one down
-    on the plate apart from the others, ready to slice."""
+    on the plate apart from the others, ready to slice; keep=True writes them
+    exactly where they are (already laid out on a plate)."""
     import zipfile
     bed = DEFAULTS["bed_mm"] if bed_mm is None else bed_mm
-    if arrange:
+    if keep:
+        off = np.zeros(3)
+    elif arrange:
         named_meshes, _ = arrange_on_plate(named_meshes, bed)
         off = np.zeros(3)
     else:

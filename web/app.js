@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.12.0"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.13.0"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -79,7 +79,7 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(300, -40
 const fill = new THREE.DirectionalLight(0xffffff, 0.6); fill.position.set(-400, 300, 200); scene.add(fill);
 const grid = new THREE.GridHelper(400, 40, 0x3a4045, 0x2a2f33); grid.rotation.x = Math.PI / 2; scene.add(grid);
 
-const groups = { latex: new THREE.Group(), planes: new THREE.Group(), regions: new THREE.Group(), arrows: new THREE.Group(), pour: new THREE.Group(), pieces: new THREE.Group(), slices: new THREE.Group(), slicePlan: new THREE.Group(), insert: new THREE.Group(), sizer: new THREE.Group(), base: new THREE.Group(), printer: new THREE.Group(), spout: new THREE.Group(), seam: new THREE.Group(), web: new THREE.Group() };
+const groups = { latex: new THREE.Group(), planes: new THREE.Group(), regions: new THREE.Group(), arrows: new THREE.Group(), pour: new THREE.Group(), pieces: new THREE.Group(), slices: new THREE.Group(), plates: new THREE.Group(), slicePlan: new THREE.Group(), insert: new THREE.Group(), sizer: new THREE.Group(), base: new THREE.Group(), printer: new THREE.Group(), spout: new THREE.Group(), seam: new THREE.Group(), web: new THREE.Group() };
 Object.values(groups).forEach((g) => scene.add(g));
 const handle = new THREE.Object3D(); scene.add(handle);
 // The open cut gets both at once: an arrow along its normal slides it, two
@@ -2250,12 +2250,13 @@ function go(step) {
   $("#rail").hidden = step !== "cut"; $("#viewTools").hidden = step !== "cut"; $("#editTools").hidden = step !== "cut"; $("#toggles").hidden = step !== "cut"; $("#legend").hidden = step !== "cut"; $("#hud").hidden = step !== "cut";
   if (step !== "cut") { $("#keys").hidden = true; closeMenu(); }
   $("#labels").hidden = step !== "cut";
-  $("#doneTools").hidden = step !== "done"; $("#spreadBox").hidden = step !== "done";
+  $("#doneTools").hidden = step !== "done"; $("#spreadBox").hidden = step !== "done" || S.show === "plates";
   groups.latex.visible = step === "cut" || (step === "done" && S.show === "latex");
   groups.slicePlan.visible = step === "cut" && $("#tSlices").checked;
   groups.pour.visible = step === "cut" && $("#tPour").checked;
   groups.insert.visible = step === "cut" && !!S.insert?.on;
-  groups.pieces.visible = step === "done" && S.show !== "slices";
+  groups.pieces.visible = step === "done" && S.show !== "slices" && S.show !== "plates";
+  groups.plates.visible = step === "done" && S.show === "plates";
   groups.slices.visible = step === "done" && (S.show === "slices" || (S.show === "latex" && !!S.build?.slices_only));
   if (step === "load") { groups.latex.visible = false; loadRecent(); }
   if (step === "cut" && S.T) refresh();
@@ -2376,20 +2377,22 @@ async function showBuild(res) {
     const g = await loadSTL(p.url);
     const idx = p.test || p.holder ? 0 : k++;
     const mat = new THREE.MeshStandardMaterial({ color: p.test ? COL.slice : p.holder ? new THREE.Color("#a77ce8") : new THREE.Color(pieceColor(idx)), roughness: 0.6, side: THREE.DoubleSide });
-    const m = new THREE.Mesh(g, mat); m.userData.pull = new V3(...p.pull);
+    const m = new THREE.Mesh(g, mat); m.userData.pull = new V3(...p.pull); m.userData.name = p.name;
     (p.test ? groups.slices : groups.pieces).add(m);
   }
   spread();
+  drawPlates(res);
   const mb = (b) => b > 1e6 ? (b / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1e3)) + " KB";
   const row = (f) => `<div><span></span><span class="mono">${mb(f.size)}</span></div>`;
   const put = (id, list) => { const el = $(id); el.innerHTML = list.map(row).join(""); [...el.children].forEach((d, i) => d.firstChild.textContent = list[i].name); el.previousElementSibling.hidden = el.hidden = !list.length; };
   const first = res.files.filter((f) => /TEST|test_slices/.test(f.name));
-  const shell = res.files.filter((f) => /^SHELL_\d+\.stl$|^shell\.3mf$/.test(f.name));
+  const shell = res.files.filter((f) => /^SHELL_\d+[A-Z]?\.stl$|^shell\.3mf$|^plate \d+\.3mf$/.test(f.name));
   const forIns = res.files.filter((f) => /^(holder|insert_cup)\./.test(f.name));
   const other = res.files.filter((f) => !first.includes(f) && !shell.includes(f) && !forIns.includes(f));
   put("#filesFirst", first); put("#filesShell", shell); put("#filesInsert", forIns); put("#filesOther", other);
   const only = !!res.slices_only;
   $("#doneTools [data-show=shell]").hidden = only;
+  $("#doneTools [data-show=plates]").hidden = only || !(res.plates || []).length;
   $("#doneTools [data-show=latex]").textContent = only ? "On the latex" : "With latex";
   $("#openBambu").hidden = only; $("#buildNow").hidden = !only;
   $("#shellNext").hidden = !only;
@@ -2414,7 +2417,8 @@ async function showBuild(res) {
     <dt>Cord notches</dt><dd>${res.notches}</dd>
     <dt>Alignment bumps</dt><dd>${res.bumps || "none"}</dd>` : `<dt>Box</dt><dd>${d.join(" × ")} mm</dd>
     <dt>Bungee channels</dt><dd>${res.channels}${res.skipped_channels ? ` (${res.skipped_channels} skipped at a cut)` : ""}</dd>`) + `
-    <dt>Fits your printer</dt><dd style="color:${res.fits_plate ? "var(--ok)" : "#f08a70"}">${res.fits_plate ? "yes" : (res.split_pieces || []).length ? "each part does" : "no"}</dd>` + ((res.split_pieces || []).length ? `
+    <dt>Fits your printer</dt><dd style="color:${res.fits_plate ? "var(--ok)" : "#f08a70"}">${res.fits_plate ? "yes" : (res.split_pieces || []).length ? "each part does" : "no"}</dd>` + ((res.plates || []).length ? `
+    <dt>Plates</dt><dd>${res.plates.length}${res.plates.length > 1 ? ` · saved as ${res.plates.map((p) => p.file).join(", ")}` : " · shell.3mf"}</dd>` : "") + ((res.split_pieces || []).length ? `
     <dt>Split to fit</dt><dd>${res.split_pieces.map((s) => `${s.piece.replace("SHELL_", "piece ")} into ${s.parts}, ${s.pegs ? `${s.pegs} pegs` : "too thin for pegs, glue them"}`).join("; ")}</dd>` : "") + `
     <dt>Pour collar</dt><dd>${+S.settings.pour_extend_mm ? S.settings.pour_extend_mm + " mm" : "off"}</dd>` + (res.insert ? `
     <dt>Thinnest concrete</dt><dd style="color:${res.insert.thinnest_mm >= (S.insert.least || 20) ? "var(--ok)" : "#f08a70"}">${res.insert.thinnest_mm} mm</dd>
@@ -2429,6 +2433,42 @@ async function showBuild(res) {
     ord.length ? '<p class="muted small">The pieces can come off in any order.</p>' : "";
   $("#donePath").textContent = res.folder;
 }
+// every printed piece on printer plates, side by side, as the engine laid them out
+function textSprite(text, h) {
+  const c = document.createElement("canvas"), x = c.getContext("2d");
+  x.font = "500 64px Inter, sans-serif";
+  c.width = Math.ceil(x.measureText(text).width) + 24; c.height = 88;
+  x.font = "500 64px Inter, sans-serif"; x.fillStyle = "#c9cdd1"; x.textBaseline = "middle"; x.fillText(text, 12, 46);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true }));
+  s.scale.set(h * c.width / c.height, h, 1); s.renderOrder = 20;
+  return s;
+}
+function drawPlates(res) {
+  dispose(groups.plates); groups.plates.clear();
+  const plates = res.plates || [];
+  if (!plates.length) return;
+  const [W, D] = res.plate_bed, gap = Math.max(40, W * 0.18);
+  const byName = new Map(groups.pieces.children.map((m) => [m.userData.name, m]));
+  plates.forEach((pl, k) => {
+    const g = new THREE.Group(); g.position.x = k * (W + gap);
+    const bed = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshBasicMaterial({ color: "#2a3035", side: THREE.DoubleSide }));
+    bed.position.set(W / 2, D / 2, -0.3);
+    const edge = new THREE.LineSegments(lineGeometry([new V3(0, 0, 0), new V3(W, 0, 0), new V3(W, 0, 0), new V3(W, D, 0), new V3(W, D, 0), new V3(0, D, 0), new V3(0, D, 0), new V3(0, 0, 0)]),
+      new THREE.LineBasicMaterial({ color: "#5d666e" }));
+    const big = pl.items.some((it) => it.too_big);
+    const label = textSprite(`Plate ${k + 1} · ${pl.items.length} ${pl.items.length === 1 ? "piece" : "pieces"}${big ? " · too big" : ""}`, Math.max(10, W * 0.06));
+    label.position.set(W / 2, -Math.max(14, W * 0.07), 0);
+    g.add(bed, edge, label);
+    for (const it of pl.items) {
+      const src = byName.get(it.name); if (!src) continue;
+      const m = new THREE.Mesh(src.geometry, it.too_big ? new THREE.MeshStandardMaterial({ color: COL.bad, roughness: 0.6, side: THREE.DoubleSide }) : src.material);
+      m.matrixAutoUpdate = false; m.matrix.set(...it.matrix);
+      g.add(m);
+    }
+    groups.plates.add(g);
+  });
+}
 function spread() {
   const v = +$("#spread").value; $("#spreadVal").textContent = `${v} mm`;
   groups.pieces.children.forEach((m) => m.position.copy(m.userData.pull).multiplyScalar(v));
@@ -2441,10 +2481,20 @@ function frameGroup(g) {
   orbit.target.copy(c); orbit.update();
 }
 $("#spread").addEventListener("input", spread);
+function framePlates() {
+  const b = new THREE.Box3().setFromObject(groups.plates); if (b.isEmpty()) return;
+  const c = b.getCenter(new V3()), s = b.getSize(new V3());
+  // far enough back that every plate and the tallest piece are in view
+  const fit = Math.max(s.x / camera.aspect, s.y + s.z * 0.6) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+  camera.position.copy(c).add(new V3(0, -0.75, 1).normalize().multiplyScalar(fit * 1.35));
+  orbit.target.copy(c); orbit.update();
+}
 function setShow(v) { S.show = v; $$("#doneTools button").forEach((x) => x.classList.toggle("on", x.dataset.show === v)); }
 $$("#doneTools [data-show]").forEach((b) => b.onclick = () => {
   setShow(b.dataset.show); go("done"); spread();
-  if (b.dataset.show === "slices") frameGroup(groups.slices); else viewFrom("fit");
+  if (b.dataset.show === "slices") frameGroup(groups.slices);
+  else if (b.dataset.show === "plates") { groups.plates.visible = true; framePlates(); }
+  else viewFrom("fit");
 });
 $("#openBambu").onclick = () => api("/api/open", { what: "bambu" }).catch((e) => toast(e.message));
 $("#openSlices").onclick = () => api("/api/open", { what: "slices" }).catch((e) => toast(e.message));

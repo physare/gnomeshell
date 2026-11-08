@@ -1,4 +1,4 @@
 {
-  "version": "0.12.0",
-  "notes": "- Pieces show in their own colours on the model, and only the cut you're working on shows its plane. Click the model to pick a piece.\n- File menu at the top left (Ctrl+O): open another scan or a recent one.\n- Settings > Show sizes in: mm, cm or inches.\n- Gap webs now reach all the way to the model, so no holes where they meet the legs."
+  "version": "0.13.0",
+  "notes": "- New Plates view after Build shell: every piece, and every part a big piece is split into, set out on plates the size of your printer, as many as it takes.\n- Each plate is saved as its own 3MF (plate 1.3mf, plate 2.3mf...) ready for the slicer."
 }

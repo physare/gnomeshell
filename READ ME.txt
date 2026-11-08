@@ -226,10 +226,16 @@ USE
      Build shell makes everything. Files go to Documents\Mold Shells\<scan name>\:
        test_slices.3mf + SHELL_n_TEST.stl   print these first to check the fit
        shell.3mf + SHELL_n.stl              the shell pieces
+       plate 1.3mf, plate 2.3mf, ...        the pieces plate by plate, when
+                                            they take more than one plate
        holder.3mf, insert_cup.3mf           only with the silicone insert on
        preview_with_latex.3mf               everything together, for looking
      The 3MFs come laid out on the plate, each part flat and apart from the
-     others, ready to slice. If they don't all fit one plate, press Arrange.
+     others, ready to slice. The Plates view (top left, after a build) shows
+     every shell piece, and every part a big piece was split into, set out
+     on plates the size of your printer, as many plates as it takes; each
+     plate is saved as its own 3MF. A piece too big even on its own shows
+     in red on a plate by itself.
      A scan with holes in it can't be built: press Repair mesh first. After
      a build, any piece that didn't come out closed is named in red.
 
