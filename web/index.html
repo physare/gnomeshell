@@ -4,11 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GnomeShell</title>
-<link rel="icon" type="image/png" sizes="256x256" href="icon.png?v=0.10.1">
+<link rel="icon" type="image/png" sizes="256x256" href="icon.png?v=0.10.2">
 <link rel="stylesheet" href="app.css">
 <script type="importmap">{"imports":{"three":"./vendor/three.module.min.js"}}</script>
 </head>
 <body>
+<div class="update-pop" id="updatePop" role="dialog" aria-labelledby="updTitle" hidden>
+  <img src="logo.png" width="36" height="36" alt="">
+  <div class="upd-text">
+    <div class="upd-title" id="updTitle"></div>
+    <div class="upd-notes" id="updNotes"></div>
+  </div>
+  <div class="upd-btns">
+    <button type="button" class="btn" id="updIgnore">Ignore</button>
+    <button type="button" class="btn primary" id="updGo">Update</button>
+  </div>
+</div>
 <div class="app">
   <header class="top">
     <div class="brand">
@@ -22,7 +33,6 @@
     </nav>
     <span class="file" id="fileName"></span>
     <span class="meta mono" id="fileMeta">Starting…</span>
-    <button type="button" class="btn sm primary" id="updateBtn" hidden></button>
   </header>
 
   <div class="body">

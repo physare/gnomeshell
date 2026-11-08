@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.10.1"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.10.2"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -2360,16 +2360,28 @@ ping();
 
 // ------------------------------------------------------------ updates from GitHub
 var UPDATING = false;
+// a card at the bottom: Update or Ignore (ignoring skips that version; the next one asks again)
 async function checkUpdate() {
   try {
     const u = await api("/api/update_check", {});
     if (!u.newer) return;
-    const b = $("#updateBtn"); b.hidden = false; b.dataset.v = u.latest; b.textContent = `Update to ${u.latest}`;
-    b.title = (u.notes ? u.notes.trim() + "\n\n" : "") + "Downloads the new version and restarts GnomeShell. Your scans and settings stay as they are.";
+    let skipped = null; try { skipped = localStorage.getItem("gs.skipUpdate"); } catch (e) { /* none */ }
+    if (skipped === u.latest) return;
+    $("#updatePop").dataset.v = u.latest;
+    $("#updTitle").textContent = `GnomeShell ${u.latest} is ready to install`;
+    const notes = $("#updNotes"); notes.textContent = "";
+    (u.notes || "").split("\n").map((l) => l.replace(/^\s*[-*]\s*/, "").trim()).filter(Boolean).slice(0, 5)
+      .forEach((l) => { const d = document.createElement("div"); d.textContent = l; notes.appendChild(d); });
+    $("#updatePop").hidden = false;
   } catch (e) { /* offline: no update shown */ }
 }
-$("#updateBtn").onclick = () => {
-  const v = $("#updateBtn").dataset.v;
+$("#updIgnore").onclick = () => {
+  try { localStorage.setItem("gs.skipUpdate", $("#updatePop").dataset.v); } catch (e) { /* not kept */ }
+  $("#updatePop").hidden = true;
+};
+$("#updGo").onclick = () => {
+  const v = $("#updatePop").dataset.v;
+  $("#updatePop").hidden = true;
   withBusy(`Updating GnomeShell to ${v}`, async () => {
     UPDATING = true;
     try { await api("/api/update_install", {}); } catch (e) { UPDATING = false; throw e; }

@@ -1,4 +1,4 @@
 {
-  "version": "0.10.1",
-  "notes": "- The app window and taskbar now show the GnomeShell icon. Close GnomeShell and open it again after updating to see it.\n- If you pinned the old Mold Shell to the taskbar, unpin it and pin GnomeShell instead."
+  "version": "0.10.2",
+  "notes": "- New updates now show as a card at the bottom of the window: Update or Ignore.\n- The app window and taskbar show the GnomeShell icon. Close GnomeShell and open it again after updating to see it."
 }
