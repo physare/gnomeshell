@@ -1,0 +1,211 @@
+GNOMESHELL
+==========
+
+Mold Shell is now called GnomeShell. Your scans and settings stay where
+they were, in Documents\Mold Shells. After unzipping this version, run
+"Make desktop shortcut.bat" again: it makes the new GnomeShell shortcut
+and removes the old Mold Shell one. If you pinned Mold Shell to the
+taskbar, unpin it and pin GnomeShell instead.
+
+Builds the 3D-printed shell (mother mold) for a latex mold scan: a box with
+a 1/4 in wall, split by flat cuts so every piece pulls straight off, with
+45 degree bungee channels at the corners, an optional pour collar, and thin
+test slices to print first.
+
+You need: Windows with Blender 5.2 installed. Nothing else.
+
+START
+  1. Unzip this folder somewhere it can stay (for example Documents\GnomeShell app).
+  2. Double-click "Make desktop shortcut.bat" once.
+  3. Double-click the GnomeShell shortcut. GnomeShell opens in its own
+     window (it uses Microsoft Edge to draw the screen, so it needs no
+     other install). It opens full screen: F11 switches between full
+     screen and a normal window, and Alt+F4 closes it. Closing the window
+     quits GnomeShell.
+     If Blender isn't found, put the path to blender.exe in blender_path.txt.
+     If something goes wrong, the engine's log is %TEMP%\GnomeShell.log.
+  4. After unzipping a new version, close every GnomeShell window first.
+     If an older copy is still running, the new one asks it to quit; if a
+     window says it's talking to an older copy, close it, end blender.exe in
+     Task Manager if it's there, and start GnomeShell again.
+
+USE
+  1. Drop a latex scan onto the window (or pick a recent one). STL, OBJ,
+     PLY and .blend files all open. From a .blend, every visible object
+     comes in as it looks in Blender (modifiers applied), joined into one
+     model. If the .blend won't open, export an STL or OBJ from Blender.
+  2. Prepare & cut:
+       - The tool rail down the left of the view has the view buttons
+         (Front, Side, Top, Fit), undo and redo, Pieces and Lines, Insert
+         view and ? for the shortcuts. The panel on the right has four tabs,
+         one job each: Scan, Cuts, Insert and Settings. Under each tab's name
+         is a short summary, and the keys 1 to 4 switch tabs. Clicking a
+         piece or a cut in the view goes to the Cuts tab by itself.
+       - Scan tab: set the size, lay it flat, rotate, fix units, trim a
+         ragged base, repair holes, or simplify a heavy scan so builds go
+         faster.
+       - Size: measure the latex and type the width, depth or height in mm
+         (or a scale %), then press Apply or Enter. With Keep proportions on,
+         one number sets the other two; turn it off to set each one. The
+         cuts move with the scan. The usual way to get the fit right: press
+         Test slices only, print them, see how they fit on the latex, nudge
+         the size, cut them again. The size you set is kept for that scan, and
+         Reset scan goes back to the scan as it was loaded.
+         You can also size it by dragging: on the Scan tab the latex has a
+         gold box round it. Drag a corner to scale the whole scan (Shift for
+         5% steps, Esc to put it back). With Keep proportions off, white dots
+         on the sides and top stretch it one way only. Letting go resizes it
+         the same as Apply.
+       - Base: puts a base on the model itself (the pour collar only
+         changes the shell). Drag the model in, open the Scan tab, and set
+         the Height (or drag the blue dot under the model); the base shows in
+         blue. Follow the bottom fills in under the model right up to its
+         underside, however uneven or tipped that is, and carries it straight
+         down; Flat slab is a plinth round the whole footprint, Margin wider,
+         which is better when the model stands on feet. Flare widens it
+         toward the bottom. Widen grows it out all round. If only a paw or a
+         corner touches the floor, Reach up is raised for you (the panel says
+         so) so the base meets the rest of the underside; a chin or a raised
+         paw higher up is left alone. Move it to change that. Press Add base
+         to put it on. Save model STL adds a base you haven't added yet, then
+         saves the model as it is now as "<name> - model.stl" in
+         the scan's folder and opens that folder; Show saved model in folder
+         opens it again later. Reset scan takes the base off again.
+       - Fit your printer (Scan tab): pick your printer on the Settings tab
+         (Bambu A2L, H2S, H2D, X1/P1/P2S/A1, A1 mini, Prusa, Creality,
+         Elegoo, or Custom with width, depth and height). Its space shows as
+         a box round the model, red when the model is too big. Suggest cuts
+         finds level cuts (and upright ones if it's too wide) so every part
+         fits, at spots where the cut is solid with room for pegs. Drag a
+         cut's slider to move it, + Level cut adds one. Split and save parts
+         saves "<name> - part 1.stl" and so on in the scan's folder, with
+         pegs on the part below each cut and matching holes in the part
+         above. Peg diameter, length and hole clearance are set there too.
+         When you build, a shell piece too big for the printer is split the
+         same way (SHELL_1A, SHELL_1B...), with pegs where the wall is thick
+         enough. Untick "Split shell pieces that don't fit the printer" on
+         the Settings tab to stop that.
+       - Pour spout (Scan tab): set the Diameter and Height, pick Straight up
+         or Out from the surface, then Place by clicking (click the model
+         where it goes) or At the top. It shows in green; Add spout joins it
+         onto the model. The shell is left open where the spout comes out,
+         so you can pour through it. Reset scan takes it off.
+       - Seam card (Scan tab): a thin card (0.56 mm) that stands straight
+         out from the model, its inner edge shaped to sit against it, from
+         the bottom up. Latex over it to get a flap that opens so the skin
+         comes off. Place by clicking, then click the model where the card's
+         top should be (click again for another card), or Suggest a spot:
+         it checks whether the skin has to stretch over something bigger
+         round than the narrowest part below it, and if so puts a card up
+         the plainest side. Each card's top has a slider. Sticks out (50 mm),
+         Thickness, Gap to model (0 fits exactly) and a Stiff edge along the
+         outer edge are settings. Save seam card STL saves each card laid
+         flat as "<name> - seam card.stl" in the scan's folder.
+       - Cuts: the best first cut is found for you. Red areas would catch.
+         Click a cut's card to open it. Move it with Turn / Tilt / Position,
+         type an exact number in the box beside each slider, or drag the
+         handle in the view: the arrow slides the cut, the two rings turn and
+         tilt it. Hold Shift while dragging to snap to 5 degrees or 5%.
+         The overhang number in the bottom right of the view updates as you
+         go, and shows what your last change did (for example 2.3 lower). The target button
+         beside each slider finds the setting with the least overhang;
+         "Optimize all three" tries them together. "Cut through the whole
+         shell" adds a cut that splits every piece it crosses.
+       - Lines: pick Lines in the tool rail, click a line between two
+         pieces (Shift-click for more) and press Delete. Only that part of
+         the cut goes, and the two pieces beside it become one. That is how
+         you keep the top whole while the bottom stays divided. Double-click
+         a line to pick its whole cut. Or Shift-click pieces and press M
+         (or Delete) to join them.
+       - Mirror: open a cut and press Mirror (or right-click it) to copy it to
+         the other side, left <-> right or front <-> back as you're looking
+         at the model. The copy goes in the matching piece on the other side
+         and its card says "mirror of" the cut it came from.
+       - Piece numbers show in the view. Click a number to pick that piece.
+       - Right-click a cut, a line or a piece for its options.
+       - Ctrl+Z undoes, Ctrl+Y redoes (or the arrow buttons in the tool
+         rail). Press ? in the view for every shortcut.
+       - Pieces: click a piece (in the list or the view), or Shift-click
+         several (Ctrl+A picks every piece), then split them Left | right,
+         Front | back or Top | bottom, as you're looking at the model, into
+         2 or more parts. One plane runs through all the picked pieces, so
+         picking both halves splits both. Pieces side by side in the split's
+         direction each get their own cut through their own middle. A cut
+         made this way stops at the picked pieces' edges, so a level cut can
+         run across the bottom columns only. Each piece gets its own pull direction (the
+         arrow); drag the arrow's tip to change it. Each piece shows its
+         own overhang and when it comes off ("off 1st", "off 2nd").
+       - Saved layouts (at the bottom of the Cuts tab): name the cuts you have and Save. Load one from the
+         list any time (Ctrl+Z goes back). The layout you're working on is
+         also kept as you go and comes back when you open the scan again.
+       - Suggest more cuts keeps splitting whichever piece has the most red,
+         up to the number of pieces set under Printer & cutting. What it
+         adds are normal cuts you can move or delete.
+       - Pour collar: carries the base opening down so you have room to pour.
+       - Test slices: pink in the view shows where they'll be cut, with a
+         line where each one meets the latex (untick Test slices at the top
+         to hide it). Upright: one slice across the main seam through the
+         top of the latex, and a slice through the middle of any piece that
+         line misses. Level: partway up each piece, clear of the channels.
+       - Insert tab (for big pieces, off until you tick it for a scan):
+         a hollow silicone insert hangs in the latex so the casting comes out
+         with a cavity. Pick round, oval, square or rectangle, and set its
+         size, height, silicone wall (3 mm) and the least concrete you want
+         round it (20 mm). Ticking it centres the insert on the opening and
+         sizes it to the latex, and with "Keep it sized to the latex" ticked
+         it sizes itself again whenever you change the wall, concrete, shape
+         or centre. If the opening is too narrow for your least concrete, it
+         keeps your wall and fits with the most concrete the opening allows
+         (shown in amber). To size it yourself, pull the dots in the view:
+         white on the side for width (and depth), white at the far end for
+         height, gold at the opening to slide it. "Fit to the latex" puts
+         it back. Ctrl+Z undoes insert changes too.
+         "Insert view" (in the tab or the tool rail, or the I key) shows just the insert and its holder,
+         solid, with the latex and shell greyed out; the dots still work
+         there. Esc goes back to the cuts. It shows
+         in blue, with the thinnest spot of concrete marked, and the panel
+         says how much silicone to mix. The holder (purple lines) sits on the
+         shell's open face with a peg in each corner. Build shell then makes:
+           holder.3mf      core (the inside of the silicone) with 3 air
+                           holes, hub, arms, four twist-lock pegs and a
+                           grooved tab off each corner for a bungee cord
+           insert_cup.3mf  the cup the silicone is cast in
+           and the shell gets a twist-lock slot in each corner of its open face.
+         To cast: pour the silicone into the cup, then push the holder's core
+         down into it until the hub sits inside the cup's collar. To use: drop
+         the pegs into the slots and turn the holder clockwise (the panel
+         says how far, about 20 degrees, as you look down at the opening).
+         The last bit of the turn gets stiff as the seat pulls the holder
+         down tight, then it clicks: that's locked. Run a bungee over each
+         corner tab so the cord sits in its groove and holds the holder down
+         while you pour. "Make just the
+         holder and cup" makes those two without the shell.
+       - Settings tab: pour collar, shell, bungee channels (tick Pairs
+         for two side by side at each level), test slice, build plate.
+         Anything you change is saved as your default for every scan. Each
+         one has a range, and a number outside it is refused with a note.
+         "Reset to the defaults" puts them back.
+       - Shell style (Settings tab, Shell): Box is the solid box with
+         bungee channels. Hug the latex makes a shell that follows the
+         latex instead, Thickness thick (4 mm by default), with a raised
+         strip along each seam, a U notch at the strip tips every Notch
+         spacing for the bungee cord to wrap round the whole mold, a flat
+         Foot round the bottom so it stands, and Alignment bumps on the
+         strips so the pieces line up. Far less filament and print time.
+         The silicone insert needs the Box style for now.
+  3. Test slices only cuts just the slices, in a fraction of the time, so
+     you can check the fit before printing the shell. They're exactly the
+     slices the full build makes. It clears the scan's folder first, so an
+     old shell that no longer matches isn't left lying there.
+     Build shell makes everything. Files go to Documents\Mold Shells\<scan name>\:
+       test_slices.3mf + SHELL_n_TEST.stl   print these first to check the fit
+       shell.3mf + SHELL_n.stl              the shell pieces
+       holder.3mf, insert_cup.3mf           only with the silicone insert on
+       preview_with_latex.3mf               everything together, for looking
+     The 3MFs come laid out on the plate, each part flat and apart from the
+     others, ready to slice. If they don't all fit one plate, press Arrange.
+     A scan with holes in it can't be built: press Repair mesh first. After
+     a build, any piece that didn't come out closed is named in red.
+
+Bambu Studio says "invalid config, load geometry data only" for any 3MF it
+didn't save itself. Click OK; it's harmless.
