@@ -2223,8 +2223,10 @@ def build_test_slices(latex_obj, cuts=None, pieces=None, frame=None, **params):
 
     got = {}
     carves = {"done": 0}
-    todo = [(k, False) for k in range(len(pieces))]
-    step, steps = 0, len(pieces)
+    # the app plans one slice for the whole mold, on one piece; the rest have none
+    todo = [(k, False) for k in range(len(pieces)) if (pieces[k].get("slice") or {}).get("point")] or \
+        [(k, False) for k in range(len(pieces))]
+    step, steps = 0, len(todo)
     while todo:
         # the pieces whose slices lie in one plane are carved together
         groups = {}
@@ -2319,6 +2321,11 @@ def make_test_slices(pieces=None, thickness_mm=None, at=None, style=None):
     at = DEFAULTS["test_slice_at"] if at is None else at
     style = style or DEFAULTS["test_slice_style"]
     pieces = pieces or _pieces()
+    # the app plans one slice for the whole mold: then only that piece gets one
+    if any("slice_point" in p for p in pieces):
+        for p in pieces:
+            _remove(p.name + TEST_SUFFIX)
+        pieces = [p for p in pieces if "slice_point" in p]
     out = []
     for piece in pieces:
         _remove(piece.name + TEST_SUFFIX)

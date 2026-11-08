@@ -440,7 +440,7 @@ def _xf(M, co):
 def part_label(name):
     """What a part is called on the plates and in the plate files."""
     if name.startswith(ms.PIECE_PREFIX) and name.endswith(ms.TEST_SUFFIX):
-        return "Test slice " + name[len(ms.PIECE_PREFIX):-len(ms.TEST_SUFFIX)]
+        return "Test slice, piece " + name[len(ms.PIECE_PREFIX):-len(ms.TEST_SUFFIX)]
     if name.startswith(ms.PIECE_PREFIX):
         return "Shell " + name[len(ms.PIECE_PREFIX):]
     if name.startswith("SEAM_CARD_"):

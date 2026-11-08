@@ -182,11 +182,14 @@ USE
          up to the number of pieces set under Printer & cutting. What it
          adds are normal cuts you can move or delete.
        - Pour collar: carries the base opening down so you have room to pour.
-       - Test slices: pink in the view shows where they'll be cut, with a
-         line where each one meets the latex (untick Test slices in the Show
-         menu at the top to hide it). Upright: one slice across the main seam through the
-         top of the latex, and a slice through the middle of any piece that
-         line misses. Level: partway up each piece, clear of the channels.
+       - Test slice: one for the whole mold, since once one piece fits they
+         all do. Pink in the view shows where it's cut, with a line where it
+         meets the latex (untick Test slices in the Show menu at the top to
+         hide it). Upright: across the main seam through the tallest point of
+         the latex. Level: Level slice height up the shell, clear of the
+         channels. Drag the pink dot to move it; it comes out of the piece
+         under the dot. "Put the slice back where it starts" (Settings tab,
+         Test slice) undoes the move, and so does Ctrl+Z.
        - Insert tab (for big pieces, off until you tick it for a scan):
          a hollow silicone insert hangs in the latex so the casting comes out
          with a cavity. Pick round, oval, square or rectangle, and set its

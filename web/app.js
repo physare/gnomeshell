@@ -101,7 +101,7 @@ const detachHandle = () => gizmos.forEach((g) => g.detach());
 // where the arrow and a ring cross, only the arrow takes the drag
 canvas.addEventListener("pointerdown", (e) => {
   if (!gizmoT.object) return;
-  if (e.button === 0 && (insHandleAt(e) || sizerAt(e))) { gizmos.forEach((g) => (g.enabled = false)); return; } // the insert's and the sizer's handles win
+  if (e.button === 0 && (insHandleAt(e) || sizerAt(e) || sliceHandleAt(e))) { gizmos.forEach((g) => (g.enabled = false)); return; } // the insert's and the sizer's handles win
   gizmos.forEach((g) => { g.enabled = true; g.pointerHover(g._getPointer(e)); });
   if (gizmoT.axis) gizmoR.enabled = false; else if (gizmoR.axis) gizmoT.enabled = false;
 }, true);
@@ -184,7 +184,7 @@ function prepTriangles(geo) {
 
 // ------------------------------------------------------------ undo / redo
 const H = { undo: [], redo: [], key: null, t: 0 };
-const snapshot = () => JSON.stringify({ cuts: S.cuts, nextId: S.nextId, joins: S.joins, pulls: S.pulls, active: S.active, insert: S.insert });
+const snapshot = () => JSON.stringify({ cuts: S.cuts, nextId: S.nextId, joins: S.joins, pulls: S.pulls, active: S.active, insert: S.insert, slice_at: S.sliceAt ?? null });
 // call before changing the layout; a run of changes with the same key (one
 // slider drag) is one step back
 // the overhang right now, so the readout in the view can show what a change did
@@ -200,6 +200,7 @@ function restore(str) {
   const o = JSON.parse(str);
   S.cuts = o.cuts; S.nextId = o.nextId; S.joins = o.joins; S.pulls = o.pulls; S.active = o.active;
   if (o.insert) { S.insert = { ...insDefaults(), ...o.insert }; insFill(); }
+  S.sliceAt = o.slice_at ?? null;
   S.selCuts.clear(); S.selSegs.clear(); S.selPieces.clear();
   if (S.active != null) S.selCuts.add(S.active);
   renderCuts(); refresh(); undoButtons();
@@ -524,37 +525,52 @@ function drawScene(T, keepHandle) {
 // or through the middle of a piece that line misses. Level: partway up each
 // piece, stepped clear of the bungee channels.
 function contourStyle() { return S.settings?.shell_style === "CONTOUR"; }
+// One test slice for the whole mold: once one piece fits, they all do. Upright,
+// it runs across the main seam through the tallest point of the latex; level,
+// it sits Level slice height up the shell. Either way it can be dragged along
+// its normal (S.sliceAt, mm along it; null = where it starts). It comes out
+// of the piece under its pink dot. Returns one entry per piece, null but for
+// that one.
 function slicePlans(T) {
   if (!T || !S.cuts.length || !T.pieces.length || !latexMesh) return [];
   const t = +S.settings.test_slice_mm || 0.4;
   const level = S.settings.test_slice_style === "HORIZONTAL";
   const n = level ? new V3(0, 0, 1) : T.frame.ex.clone();
-  let top = null;
-  if (!level) {
-    const pos = latexPos(); let zi = 2;
-    for (let i = 5; i < pos.length; i += 3) if (pos[i] > pos[zi]) zi = i;
-    top = new V3(pos[zi - 2], pos[zi - 1], pos[zi]);
-  }
+  const pos = latexPos(); let zi = 2;
+  for (let i = 5; i < pos.length; i += 3) if (pos[i] > pos[zi]) zi = i;
+  const top = new V3(pos[zi - 2], pos[zi - 1], pos[zi]);
   // channel heights, placed as the engine places them
   const nh = Math.max(0, Math.round(+S.settings.holes_per_corner || 0)), r = (+S.settings.hole_d_mm || 0) / 2;
   const z0 = T.boxLo[2], z1 = T.boxHi[2], g = (+S.settings.pair_gap_mm || 10) / 2;
   let chz = contourStyle() ? [] : [...Array(nh)].map((_, i) => z0 + (z1 - z0) * (i + 0.5) / nh);
   if (S.settings.channel_pairs) chz = chz.flatMap((z) => [z - g, z + g]);
-  return T.pieces.map((P) => {
+  const span = T.pieces.map((P) => {
     const vs = P.cells.flatMap((ci) => polyVerts(T.cells[ci].poly));
     let mn = Infinity, mx = -Infinity; const c = new V3();
     for (const v of vs) { const d = n.dot(v); mn = Math.min(mn, d); mx = Math.max(mx, d); c.add(v); }
-    c.multiplyScalar(1 / Math.max(1, vs.length));
-    const on = (d) => c.clone().addScaledVector(n, d - n.dot(c));
-    if (level) {
-      let z = mn + (mx - mn) * (+S.settings.test_slice_at || 0.5) - t / 2;
-      for (let k = 0; k < 20; k++) { if (chz.every((cz) => Math.abs(z + t / 2 - cz) > r + 2)) break; z += 2 * r + 2; }
-      return { normal: n, d: z + t / 2, point: on(z + t / 2), why: `${Math.round(z - mn)} mm up the piece` };
-    }
-    const d0 = n.dot(top), mid = (mn + mx) / 2;
-    if (mx < d0 - t / 2 || mn > d0 + t / 2) return { normal: n, d: mid, point: on(mid), why: "middle of the piece", middle: true };
-    return { normal: n, d: d0, point: top.clone(), alt: on(mid), why: "top of the latex" };
+    return { mn, mx, c: c.multiplyScalar(1 / Math.max(1, vs.length)) };
   });
+  const mnAll = Math.min(...span.map((p) => p.mn)), mxAll = Math.max(...span.map((p) => p.mx));
+  let d0;
+  if (level) {
+    let z = mnAll + (mxAll - mnAll) * (+S.settings.test_slice_at || 0.5) - t / 2;
+    for (let k = 0; k < 20; k++) { if (chz.every((cz) => Math.abs(z + t / 2 - cz) > r + 2)) break; z += 2 * r + 2; }
+    d0 = z + t / 2;
+  } else d0 = n.dot(top);
+  const d = S.sliceAt == null ? d0 : clamp(d0 + S.sliceAt, mnAll + t, mxAll - t);
+  const at = top.clone().addScaledVector(n, d - n.dot(top)); // the pink dot: over the tallest point, on the slice
+  // the piece under the dot; failing that, the one the slice crosses nearest it
+  const inside = (P) => P.cells.some((ci) => T.cells[ci].hs.every((h) => h.n.x * at.x + h.n.y * at.y + h.n.z * at.z - h.d >= -0.01));
+  let k = T.pieces.findIndex(inside);
+  if (k < 0) {
+    let best = Infinity;
+    span.forEach((p, i) => { if (d < p.mn || d > p.mx) return; const dd = p.c.distanceTo(at); if (dd < best) { best = dd; k = i; } });
+    if (k < 0) k = 0;
+  }
+  const moved = S.sliceAt != null && Math.abs(d - d0) > 0.5;
+  const why = level ? `${Math.round(d - z0)} mm up` : moved ? `${Math.round(Math.abs(d - d0))} mm from the top of the latex` : "top of the latex";
+  const mid = span[k].c.clone().addScaledVector(n, d - n.dot(span[k].c));
+  return T.pieces.map((P, i) => (i === k ? { normal: n, d, d0, point: at, alt: mid, why, at, piece: i } : null));
 }
 const planJSON = (pl) => pl && { point: pl.point.toArray(), normal: pl.normal.toArray(), alt: pl.alt ? pl.alt.toArray() : null, why: pl.why };
 // the line a plane draws across the latex, as flat segment pairs
@@ -593,6 +609,7 @@ function drawSlicePlan(T) {
   // pieces sliced in the same plane share one sheet and one line
   const byPlane = new Map();
   plans.forEach((pl, i) => {
+    if (!pl) return;
     const k = `${pl.d.toFixed(3)}|${pl.normal.toArray().map((x) => x.toFixed(4)).join()}`;
     if (!byPlane.has(k)) byPlane.set(k, []);
     byPlane.get(k).push(i);
@@ -627,21 +644,27 @@ function drawSlicePlan(T) {
     groups.slicePlan.add(line); // only the line on the model: a sheet out past it is one plane too many
     sheet.geometry.dispose(); edge.geometry.dispose();
   }
+  // the dot to drag it by, and a short arrow each way along its normal
+  const pl = plans.find(Boolean);
+  if (pl) {
+    const hs = Math.max(2.5, size() * 0.013);
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(hs * (sliceDrag ? 1.25 : 1), 16, 12), new THREE.MeshBasicMaterial({ color: COL.plan, depthTest: false, transparent: true, opacity: 0.95 }));
+    dot.position.copy(pl.at); dot.renderOrder = 6; dot.userData = { sliceHandle: true, part: "handle" };
+    const a = pl.at.clone().addScaledVector(pl.normal, -hs * 4), b = pl.at.clone().addScaledVector(pl.normal, hs * 4);
+    const ax = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), new THREE.LineBasicMaterial({ color: COL.plan, depthTest: false, transparent: true }));
+    ax.renderOrder = 6; ax.userData = { part: "handle" };
+    groups.slicePlan.add(dot, ax);
+  }
   highlight();
 }
 function sliceNote(plans) {
   const el = $("#sliceNote");
-  if (!plans.length) { el.textContent = "Add a cut to see where the test slices go."; return; }
-  const t = +S.settings.test_slice_mm || 0.4;
-  if (S.settings.test_slice_style === "HORIZONTAL") {
-    el.textContent = `Shown in pink in the view. Each piece gets a level ${t} mm slice partway up, clear of the bungee channels.`;
-    return;
-  }
-  const mid = plans.map((p, i) => (p.middle ? i + 1 : 0)).filter(Boolean);
-  el.textContent = `Shown in pink in the view: one upright ${t} mm slice across the main seam, through the top of the latex.` +
-    (mid.length ? ` ${mid.length === 1 ? "Piece" : "Pieces"} ${mid.join(", ")} ${mid.length === 1 ? "isn't" : "aren't"} on that line, so ${mid.length === 1 ? "its slice goes" : "theirs go"} through the middle instead.` : "");
+  $("#sliceReset").hidden = S.sliceAt == null;
+  if (!plans.length) { el.textContent = "Add a cut to see where the test slice goes."; return; }
+  const t = +S.settings.test_slice_mm || 0.4, pl = plans.find(Boolean);
+  const where = S.settings.test_slice_style === "HORIZONTAL" ? `one level ${t} mm slice, ${pl.why}` : `one upright ${t} mm slice across the main seam, through the ${pl.why === "top of the latex" ? "tallest point of the latex" : pl.why}`;
+  el.textContent = `Shown in pink in the view: ${where}, from piece ${pl.piece + 1}. One is enough: once it fits, they all do. Drag the pink dot to move it.`;
 }
-
 // selection and hover colours, without rebuilding anything
 function highlight() {
   const activeCut = S.active;
@@ -666,7 +689,7 @@ function highlight() {
   }
   for (const o of groups.slicePlan.children) {
     const on = !anyPiece || (o.userData.pieces || []).some((id) => S.selPieces.has(id));
-    o.material.opacity = { sheet: on ? 0.2 : 0.04, edge: on ? 0.8 : 0.15, line: on ? 1 : 0.25 }[o.userData.part] ?? o.material.opacity;
+    o.material.opacity = { sheet: on ? 0.2 : 0.04, edge: on ? 0.8 : 0.15, line: on ? 1 : 0.25, handle: 0.95 }[o.userData.part] ?? o.material.opacity;
   }
 }
 // the view handle sits on the cut, in the middle of the lines it still has:
@@ -1247,6 +1270,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (sh) { sizerStart(e, sh); e.stopImmediatePropagation(); return; }
   const ih = e.button === 0 && S.step === "cut" ? insHandleAt(e) : null;
   if (ih) { insDragStart(e, ih); e.stopImmediatePropagation(); return; }
+  if (e.button === 0 && S.step === "cut" && sliceHandleAt(e)) { sliceDragStart(e); e.stopImmediatePropagation(); return; }
   if (S.step !== "cut" || gizmoHot()) return;
   if (e.button === 2) { down = { x: e.clientX, y: e.clientY, button: 2 }; return; }
   if (e.button !== 0) return;
@@ -1264,6 +1288,7 @@ canvas.addEventListener("pointerdown", (e) => {
 canvas.addEventListener("pointermove", (e) => {
   if (sizeDrag) { sizerMove(e); return; }
   if (insDrag) { insDragMove(e); return; }
+  if (sliceDrag) { sliceDragMove(e); return; }
   if (drag) {
     setRay(e);
     const p = new V3();
@@ -1278,7 +1303,7 @@ canvas.addEventListener("pointermove", (e) => {
   if (e.buttons || S.step !== "cut" || hoverT) return;
   hoverT = requestAnimationFrame(() => {
     hoverT = null;
-    if (insHandleAt(e) || sizerAt(e)) { canvas.style.cursor = "grab"; return; }
+    if (insHandleAt(e) || sizerAt(e) || sliceHandleAt(e)) { canvas.style.cursor = "grab"; return; }
     const h = gizmoHot() ? null : pickAt(e, modeKind());
     if ((h && h.key) !== (S.hover && S.hover.key)) { S.hover = h; highlight(); canvas.style.cursor = h ? "pointer" : ""; }
   });
@@ -1287,6 +1312,7 @@ canvas.addEventListener("pointerleave", () => { if (S.hover) { S.hover = null; h
 canvas.addEventListener("pointerup", (e) => {
   if (sizeDrag) { sizerEnd(e); return; }
   if (insDrag) { insDragEnd(e); return; }
+  if (sliceDrag) { sliceDragEnd(e); return; }
   if (drag) { drag = null; orbit.enabled = true; canvas.releasePointerCapture?.(e.pointerId); refresh(); return; }
   if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) { down = null; return; }
   const button = down.button; down = null;
@@ -1517,7 +1543,8 @@ SET_FIELDS.forEach((el) => el.addEventListener("change", () => {
   saveSettings(); estimate(); fillSettings();
   if (["draft_deg", "wall_mm", "bottom_trim_mm", "test_slice_mm", "test_slice_at", "hole_d_mm", "holes_per_corner", "channel_pairs", "pair_gap_mm"].includes(el.id)) refresh();
 }));
-$$("#sliceStyle button").forEach((b) => b.onclick = () => { S.settings.test_slice_style = b.dataset.style; saveSettings(); fillSettings(); refresh(); });
+$$("#sliceStyle button").forEach((b) => b.onclick = () => { S.settings.test_slice_style = b.dataset.style; S.sliceAt = null; saveSettings(); fillSettings(); refresh(); });
+$("#sliceReset").onclick = () => { mark(null); S.sliceAt = null; if (S.T) drawSlicePlan(S.T); autosaveSoon(); };
 $$("#shellStyle button").forEach((b) => b.onclick = () => { S.settings.shell_style = b.dataset.style; saveSettings(); fillSettings(); estimate(); refresh(); });
 $("#plate").onchange = (e) => {
   if (e.target.value !== "custom") { const [w, d, h] = e.target.value.split(",").map(Number); S.settings.bed_mm = w; S.settings.bed_d_mm = d; S.settings.bed_h_mm = h; saveSettings(); fillSettings(); estimate(); }
@@ -1579,13 +1606,13 @@ async function updatePour() {
 // ------------------------------------------------------------ layouts
 // The cuts you're working on are kept for each scan as you go, and come back
 // when you open the scan again. You can also save layouts by name.
-const layoutNow = () => ({ cuts: S.cuts, nextId: S.nextId, joins: S.joins, pulls: S.pulls, insert: S.insert, pieces: S.T ? S.T.pieces.length : 0, dims: S.scan && S.scan.size });
+const layoutNow = () => ({ cuts: S.cuts, nextId: S.nextId, joins: S.joins, pulls: S.pulls, insert: S.insert, slice_at: S.sliceAt ?? null, pieces: S.T ? S.T.pieces.length : 0, dims: S.scan && S.scan.size });
 let autoT = null, autoLast = "";
 function autosaveSoon() {
   if (!S.scan || S.step !== "cut") return;
   clearTimeout(autoT);
   autoT = setTimeout(() => {
-    const L = layoutNow(), key = JSON.stringify([L.cuts, L.joins, L.pulls, L.insert]);
+    const L = layoutNow(), key = JSON.stringify([L.cuts, L.joins, L.pulls, L.insert, L.slice_at]);
     if (key === autoLast) return;
     autoLast = key;
     api("/api/layouts", { op: "auto", layout: L }).catch(() => {});
@@ -1597,6 +1624,7 @@ function applyLayout(L) {
   S.active = S.cuts.length ? S.cuts[S.cuts.length - 1].id : null;
   S.selCuts = new Set(S.active != null ? [S.active] : []); S.selSegs.clear(); S.selPieces.clear();
   if (L.insert) { S.insert = { ...insDefaults(), ...L.insert }; insFill(); }
+  S.sliceAt = L.slice_at ?? null;
   renderCuts(); refresh();
 }
 const when = (t) => (t || "").replace("T", " ").slice(0, 16);
@@ -1655,7 +1683,7 @@ async function showScan(info, keepCuts, restore) {
   if (!keepCuts) {
     S.cuts = []; S.pulls = {}; S.joins = []; S.nextId = 1; S.active = null;
     S.selCuts.clear(); S.selSegs.clear(); S.selPieces.clear();
-    S.insert = insDefaults(); insFill();
+    S.insert = insDefaults(); insFill(); S.sliceAt = null;
     if (info.suggested) { const { c, point } = cutFromSuggestion(info.suggested); S.cuts.push(c); placeFromPoint(c, point); c.auto = true; S.active = c.id; S.selCuts.add(c.id); }
     resetHistory();
   }
@@ -3364,6 +3392,32 @@ $("#railIns").onclick = () => {
 $("#insViewBack").onclick = () => setInsView(false);
 // ------------------------------------------------------------ pulling the insert's handles
 var insDrag = null; // var: drawInsert can run before this line does
+// ------------------------------------------------------------ dragging the test slice
+var sliceDrag = null;
+function sliceHandleAt(e) {
+  if (!groups.slicePlan.visible || S.step !== "cut") return false;
+  setRay(e);
+  return !!ray.intersectObjects(groups.slicePlan.children.filter((o) => o.userData.sliceHandle), false)[0];
+}
+function sliceDragStart(e) {
+  const pl = (S.T.slicePlans || []).find(Boolean); if (!pl) return;
+  mark(null);
+  setRay(e);
+  sliceDrag = { o: pl.at.clone(), n: pl.normal.clone(), from: (S.sliceAt == null ? pl.d - pl.d0 : S.sliceAt), t0: lineParam(pl.at, pl.normal) || 0 };
+  orbit.enabled = false; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = "grabbing";
+}
+let sliceFrame = null;
+function sliceDragMove(e) {
+  setRay(e);
+  const t = lineParam(sliceDrag.o, sliceDrag.n); if (t == null) return;
+  S.sliceAt = +(sliceDrag.from + t - sliceDrag.t0).toFixed(1);
+  if (!sliceFrame) sliceFrame = requestAnimationFrame(() => { sliceFrame = null; drawSlicePlan(S.T); });
+}
+function sliceDragEnd(e) {
+  sliceDrag = null;
+  orbit.enabled = true; canvas.releasePointerCapture?.(e.pointerId); canvas.style.cursor = "";
+  drawSlicePlan(S.T); autosaveSoon();
+}
 function insHandleAt(e) {
   if (!groups.insert.visible || S.step !== "cut") return null;
   setRay(e);
@@ -3525,7 +3579,7 @@ $("#insOnly").onclick = () => {
 };
 
 // for testing
-window.__ms = { showTab, splitPartOf, SPLIT, SEAM, curTab, sizerAt, drawSizer, sizerOn, baseH, setBaseH, latexDistance, INS, S, insCentre: (T) => insCentreOnOpening(T), insFit, insAutoFit, insHandleAt, setInsView, insViewOn, insThinnest, insLayout, drawInsert, insSpec, loadRecent, frameGroup, slicePlans, startBuild, pickAt, pieceSpec, refresh, compute, splitPieces, splitNormal, pickAllPieces, mirrorCuts, mirrorPlane, applyLayout, layoutNow, labels: () => labels, renderCuts, camera, groups, removeCut, deleteSegs, deleteCuts, mergePieces, optimize, undo, redo, setMode, selectSeg, selectPiece, selectCut, H, meshes, handle, gizmoT, gizmoR, onHandleMove };
+window.__ms = { showTab, splitPartOf, SPLIT, SEAM, drawSlicePlan, sliceDragStart, curTab, sizerAt, drawSizer, sizerOn, baseH, setBaseH, latexDistance, INS, S, insCentre: (T) => insCentreOnOpening(T), insFit, insAutoFit, insHandleAt, setInsView, insViewOn, insThinnest, insLayout, drawInsert, insSpec, loadRecent, frameGroup, slicePlans, startBuild, pickAt, pieceSpec, refresh, compute, splitPieces, splitNormal, pickAllPieces, mirrorCuts, mirrorPlane, applyLayout, layoutNow, labels: () => labels, renderCuts, camera, groups, removeCut, deleteSegs, deleteCuts, mergePieces, optimize, undo, redo, setMode, selectSeg, selectPiece, selectCut, H, meshes, handle, gizmoT, gizmoR, onHandleMove };
 
 // ------------------------------------------------------------ tooltips and panels
 // Hover anything with a title (or a ? icon) for a tooltip; long help lives there, not in the panel.
