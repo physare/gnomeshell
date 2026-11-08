@@ -1,0 +1,4 @@
+{
+  "version": "0.10.0",
+  "notes": "- Mold Shell is now GnomeShell, with the new logo and the Inter font. Run \"Make desktop shortcut.bat\" again for the new shortcut.\n- Cleaner, more compact side panels. Long help moved into ? tooltips.\n- Ctrl+Z now undoes resizing, turning, bases, spouts, trims and the other scan changes.\n- GnomeShell checks for updates when it opens and can install them with one click."
+}

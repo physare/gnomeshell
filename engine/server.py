@@ -1191,12 +1191,15 @@ def run_job(fn, *args):
 
 
 # ----------------------------------------------------------------- updates
-# New versions are published as releases of the public GitHub repo, each with
-# GnomeShell.zip attached. The app checks once when it opens; installing
-# unpacks the zip over this folder and starts the new engine in this one's place.
+# New versions go to the public GitHub repo's main branch, with version.json
+# saying which version it is. The app checks that file once when it opens;
+# installing downloads the branch as a zip, unpacks it over this folder and
+# starts the new engine in this one's place.
 UPDATE_REPO = "physare/gnomeshell"
+UPDATE_BRANCH = "main"
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UPDATE = {"checked": 0, "info": None}
+SKIP_ON_UPDATE = {"README.md", "version.json", ".gitattributes", ".gitignore"}
 
 
 def _ver(v):
@@ -1206,8 +1209,8 @@ def _ver(v):
         return (0,)
 
 
-def _gh(url, timeout=8):
-    req = urllib.request.Request(url, headers={"User-Agent": "GnomeShell-updater", "Accept": "application/vnd.github+json"})
+def _fetch(url, timeout=8):
+    req = urllib.request.Request(url, headers={"User-Agent": "GnomeShell-updater", "Cache-Control": "no-cache"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
 
@@ -1217,11 +1220,9 @@ def update_check(force=False):
         return UPDATE["info"]
     info = {"current": APP_VERSION, "newer": False}
     try:
-        rel = json.loads(_gh(f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest") or b"{}")
-        latest = (rel.get("tag_name") or "").lstrip("vV")
-        asset = next((a for a in rel.get("assets") or [] if a.get("name", "").lower().endswith(".zip")), None)
-        info.update(latest=latest, notes=(rel.get("body") or "")[:2000], newer=bool(asset) and _ver(latest) > _ver(APP_VERSION),
-                    url=asset and asset.get("browser_download_url"))
+        v = json.loads(_fetch(f"https://raw.githubusercontent.com/{UPDATE_REPO}/{UPDATE_BRANCH}/version.json?t={int(time.time())}") or b"{}")
+        latest = str(v.get("version") or "")
+        info.update(latest=latest, notes=str(v.get("notes") or "")[:2000], newer=_ver(latest) > _ver(APP_VERSION))
     except Exception as e:  # offline, or GitHub didn't answer: no update, no fuss
         info["error"] = str(e)
     UPDATE.update(checked=time.time(), info=info)
@@ -1230,22 +1231,25 @@ def update_check(force=False):
 
 def update_install():
     info = update_check(force=True)
-    if not info.get("newer") or not info.get("url"):
+    if not info.get("newer"):
         raise RuntimeError("There's no newer version to install." if not info.get("error") else
                            "Couldn't reach GitHub to download the update. Check the internet connection and try again.")
     import io
     import zipfile
-    data = _gh(info["url"], timeout=120)
+    data = _fetch(f"https://codeload.github.com/{UPDATE_REPO}/zip/refs/heads/{UPDATE_BRANCH}", timeout=180)
     with zipfile.ZipFile(io.BytesIO(data)) as z:
-        names = z.namelist()
-        if "engine/server.py" not in names or "web/index.html" not in names:
+        files = {}
+        for n in z.namelist():
+            parts = n.replace("\\", "/").split("/")[1:]  # drop the "gnomeshell-main/" folder
+            if not parts or not parts[-1] or ".." in parts or parts[0] in SKIP_ON_UPDATE:
+                continue
+            files["/".join(parts)] = n
+        if "engine/server.py" not in files or "web/index.html" not in files:
             raise RuntimeError("The update download doesn't look like GnomeShell. Nothing was changed.")
         changed = 0
-        for n in names:
-            if n.endswith("/") or ".." in n.replace("\\", "/").split("/") or os.path.isabs(n):
-                continue
+        for rel, n in files.items():
             new = z.read(n)
-            dest = os.path.join(APP_DIR, *n.split("/"))
+            dest = os.path.join(APP_DIR, *rel.split("/"))
             if os.path.isfile(dest):
                 with open(dest, "rb") as f:
                     if f.read() == new:
@@ -1256,7 +1260,8 @@ def update_install():
                 f.write(new)
             os.replace(tmp, dest)
             changed += 1
-    threading.Timer(1.0, _restart_engine).start()
+    if not os.environ.get("GNOMESHELL_NO_RESTART"):
+        threading.Timer(1.0, _restart_engine).start()
     return {"ok": True, "version": info["latest"], "changed": changed}
 
 

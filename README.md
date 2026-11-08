@@ -4,7 +4,7 @@ GnomeShell builds 3D-printed mother-mold shells around latex mold scans. It runs
 
 ## Install
 
-1. Download `GnomeShell.zip` from the [latest release](https://github.com/physare/gnomeshell/releases/latest).
+1. Click **Code > Download ZIP** on this page, or use the `GnomeShell.zip` you were sent.
 2. Unzip it somewhere it can stay.
 3. Double-click `Make desktop shortcut.bat` once, then start GnomeShell from the shortcut.
 
@@ -12,16 +12,15 @@ GnomeShell builds 3D-printed mother-mold shells around latex mold scans. It runs
 
 ## Updates
 
-When GnomeShell opens, it checks this repo's latest release. If a newer version is out, an **Update** button appears at the top right. Clicking it downloads the release's `GnomeShell.zip`, unpacks it over the app folder and restarts the app. Your scans and settings stay where they are, in `Documents\Mold Shells`.
+When GnomeShell opens, it reads `version.json` from this repo's `main` branch. If that version is newer than the one running, an **Update** button appears at the top right. Clicking it downloads `main` as a zip, unpacks it over the app folder and restarts the app. Your scans and settings stay where they are, in `Documents\Mold Shells`.
 
-## Publishing a release
+## Publishing a version
 
-Bump the version in three places so they match:
-
-- `APP_VERSION` in `engine/server.py`
-- `APP_VERSION` in `web/app.js`
-- `"version"` in `engine/mold_shell.py`
-
-Then create a release tagged `vX.Y.Z` and attach `GnomeShell.zip`. The zip holds this repo's files at its top level, with no enclosing folder.
+1. Bump the version in four places so they match:
+   - `APP_VERSION` in `engine/server.py`
+   - `APP_VERSION` in `web/app.js`
+   - `"version"` in `engine/mold_shell.py`
+   - `version.json`, along with its short `notes`
+2. Push to `main`. Every copy of the app offers the update the next time it opens.
 
 Inter is bundled under the SIL Open Font License (`web/vendor/fonts/Inter-LICENSE.txt`).
