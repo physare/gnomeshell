@@ -42,7 +42,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.11.0"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.11.1"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -359,11 +359,26 @@ def _job_load(stl_bytes, filename, resave=True, prepared=False, quick=False):
     prep = _read_json(os.path.join(folder, "prep.json"), {}) if use_prep else {}
     if prep.get("spouts"):
         latex["spouts"] = json.dumps(prep["spouts"])
+    # a scan only millimetres across was saved in other units: bring it up to size
+    big = float(max(latex.dimensions))
+    grow = _tiny_scale(big)
+    if grow != 1:
+        _apply_matrix(latex, Matrix.Scale(grow, 4))  # spouts move with it
+        if use_prep:
+            prep = _read_json(os.path.join(folder, "prep.json"), {}) or {}
+            if prep.get("loaded_dims") and max(prep["loaded_dims"]) < TINY_MM:
+                prep["loaded_dims"] = [round(x * grow, 2) for x in prep["loaded_dims"]]
+                _write_json(os.path.join(folder, "prep.json"), prep)
     _settle(latex)
     if not use_prep:
         prep = {"loaded_dims": [round(x, 2) for x in latex.dimensions]}
         _write_json(os.path.join(folder, "prep.json"), prep)
+    if grow != 1 and use_prep:
+        co, tris = ms._world_tris(latex)
+        ms._write_stl(prep_stl, co, tris)
     info = _scan_info(latex)
+    if grow != 1:
+        info["grown"] = {"factor": grow, "was": float(f"{big:.3g}")}
     info["file"] = os.path.basename(filename or "scan.stl")
     info["prepared"] = bool(use_prep)
     info["layouts"] = _read_json(os.path.join(folder, "layouts.json"), {}) or {}
@@ -371,6 +386,21 @@ def _job_load(stl_bytes, filename, resave=True, prepared=False, quick=False):
         progress("Finding the best cut")
         info["suggested"] = job_suggest(load_settings().get("max_tilt_deg", 30))
     return info
+
+
+TINY_MM = 20.0  # a scan smaller than this across was saved in other units (Blender's metres, say)
+
+
+def _tiny_scale(big):
+    """How much to scale a scan that came in far too small, by a power of ten:
+    the one that makes it 50 to 1000 mm across, preferring metres (x1000), then
+    x100, then cm (x10); failing those, whatever lands nearest 200 mm."""
+    if not big or big >= TINY_MM:
+        return 1
+    for f in (1000, 100, 10):
+        if 50 <= big * f <= 1000:
+            return f
+    return min((10, 100, 1000, 10000, 100000), key=lambda f: abs(math.log(big * f / 200.0)))
 
 
 def _readable_stl(b):

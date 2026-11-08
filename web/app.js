@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.11.0"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.11.1"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -1609,7 +1609,7 @@ async function showScan(info, keepCuts, restore) {
   renderLayouts();
   renderCuts();
   refresh();
-  const back = restore && info.layouts && info.layouts.auto;
+  const back = restore && !info.grown && info.layouts && info.layouts.auto; // a layout made at the tiny size would be wrong now
   if (back && back.cuts && back.cuts.length) {
     mark(null); applyLayout(back); autoLast = JSON.stringify([S.cuts, S.joins, S.pulls]);
     toast(`Brought back your last layout for this scan${info.prepared ? ", at the size you set" : ""}. Ctrl+Z gives the suggested first cut instead.`, true);
@@ -2252,7 +2252,8 @@ async function takeFile(file) {
     S.build = null; groups.pieces.clear(); groups.slices.clear();
     go("cut"); await showScan(info, false, true); viewFrom("fit");
     const big = Math.max(...info.dims);
-    if (big < 30) {
+    if (info.grown) grownNote(info);
+    else if (big < 30) {
       showTab("scan");
       toast(`This scan is only ${big} mm across. If it was saved in cm or inches, pick that under "Scan was saved in".`);
     }
@@ -2264,6 +2265,12 @@ const view = $("#view");
 ["dragleave", "drop"].forEach((t) => view.addEventListener(t, (e) => { e.preventDefault(); $("#drop").classList.remove("over"); if (S.step !== "load") $("#drop").hidden = true; }));
 view.addEventListener("drop", (e) => takeFile(e.dataTransfer.files[0]));
 
+// a scan that came in only millimetres across gets scaled up on loading: say so
+function grownNote(info) {
+  showTab("scan");
+  toast(`This scan came in only ${+(+info.grown.was).toPrecision(2)} mm across, so it was probably saved in metres or another unit. ` +
+    `GnomeShell made it ${info.grown.factor}× bigger: it's now ${fmtDims(info.size || info.dims)} mm. If that isn't right, type the real size under Size.`, true);
+}
 async function loadRecent() {
   const list = await api("/api/recent").catch(() => null);
   const box = $("#recent");
@@ -2279,6 +2286,7 @@ async function loadRecent() {
       const info = await api("/api/load_recent", { name: r.name });
       S.build = null; groups.pieces.clear(); groups.slices.clear();
       go("cut"); await showScan(info, false, true); viewFrom("fit");
+      if (info.grown) grownNote(info);
     });
     box.appendChild(b);
   });

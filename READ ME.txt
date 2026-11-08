@@ -40,6 +40,10 @@ USE
      PLY and .blend files all open. From a .blend, every visible object
      comes in as it looks in Blender (modifiers applied), joined into one
      model. If the .blend won't open, export an STL or OBJ from Blender.
+     A scan that comes in under 20 mm across was saved in other units
+     (Blender's metres, say), so GnomeShell scales it up by 10, 100 or
+     1000 to somewhere between 50 mm and 1 m and tells you. If the size
+     it picked is wrong, type the real one under Size.
   2. Prepare & cut:
        - The tool rail down the left of the view has the view buttons
          (Front, Side, Top, Fit), undo and redo, Pieces and Lines, Insert
