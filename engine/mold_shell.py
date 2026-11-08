@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Mold Shell Builder",
     "author": "Gnome and Garden",
-    "version": (0, 13, 3),
+    "version": (0, 13, 4),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar (N) > Mold Shell",
     "description": "Builds a split, 3D-printable mother mold shell around a latex mold scan",
@@ -2333,6 +2333,8 @@ def make_test_slices(pieces=None, thickness_mm=None, at=None, style=None):
             tries.append((Vector(piece["slice_point"]) + shift, n, ("slice_through", piece.get("slice_why") or "as planned")))
             if "slice_alt" in piece:
                 tries.append((Vector(piece["slice_alt"]) + shift, n, ("slice_through", "middle of the piece")))
+            if len(pv):  # a piece made from a stray bit keeps its parent's plan, which can miss it
+                tries.append((Vector(pv.mean(0).tolist()), n, ("slice_through", "middle of the piece")))
         elif style == "VERTICAL" and "top_point" in piece and "frame_ex" in piece:
             n = Vector(piece["frame_ex"]).normalized()
             top = Vector(piece["top_point"]) + shift

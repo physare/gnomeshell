@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.13.3"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.13.4"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -1235,7 +1235,7 @@ function setMode(m) {
 let drag = null, down = null, hoverT = null;
 canvas.addEventListener("pointerdown", (e) => {
   down = null; closeMenu();
-  if (SEAM.picking || WEB.picking || splitHandleAt(e)) return; // their own click handlers deal with it
+  if (SEAM.picking || WEB.picking || SPOUT.picking || splitHandleAt(e)) return; // their own click handlers deal with it
   const sh = e.button === 0 && S.step === "cut" ? sizerAt(e) : null;
   if (sh) { sizerStart(e, sh); e.stopImmediatePropagation(); return; }
   const ih = e.button === 0 && S.step === "cut" ? insHandleAt(e) : null;
