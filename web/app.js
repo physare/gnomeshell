@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.10.2"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.10.3"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -2386,12 +2386,16 @@ $("#updGo").onclick = () => {
     UPDATING = true;
     try { await api("/api/update_install", {}); } catch (e) { UPDATING = false; throw e; }
     $("#busySub").textContent = "Restarting with the new version…";
-    for (let i = 0; i < 150; i++) {
+    for (let i = 0; i < 45; i++) {
       await new Promise((r) => setTimeout(r, 1000));
-      try { const j = await (await fetch("/api/ping")).json(); if (j.version === v) { location.reload(); return; } } catch (e) { /* still restarting */ }
+      try {
+        const j = await (await fetch("/api/ping")).json();
+        if (j.version === v) { location.reload(); return; }
+        if (j.restart_error) break;
+      } catch (e) { /* still restarting */ }
     }
     UPDATING = false;
-    throw new Error("The update is installed, but GnomeShell didn't restart by itself. Close this window and start it again from its shortcut.");
+    throw new Error(`GnomeShell ${v} is installed, but it couldn't restart by itself. Close this window and open GnomeShell again from its shortcut.`);
   });
 };
 addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", ""));

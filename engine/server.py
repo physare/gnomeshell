@@ -41,7 +41,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.10.2"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.10.3"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -1272,12 +1272,21 @@ def _restart_engine():
     """Start the new engine without a window of its own; it asks this one to
     quit and takes its port, and the open window reloads onto it."""
     env = dict(os.environ, MOLDSHELL_NO_BROWSER="1")
-    log = os.path.join(tempfile.gettempdir(), "GnomeShell.log")
-    flags = (0x00000008 | 0x00000200 | 0x08000000) if os.name == "nt" else 0  # detached, own group, no console
-    with open(log, "ab") as out:
-        subprocess.Popen([bpy.app.binary_path, "-b", "--factory-startup", "--python", os.path.join(APP_DIR, "engine", "server.py")],
-                         env=env, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=flags,
-                         cwd=APP_DIR, start_new_session=os.name != "nt")
+    # its own log: GnomeShell.log is still held open by the launcher that started this engine
+    log = os.path.join(tempfile.gettempdir(), "GnomeShell-restart.log")
+    flags = (0x00000008 | 0x00000200) if os.name == "nt" else 0  # detached, own process group
+    cmd = [bpy.app.binary_path, "-b", "--factory-startup", "--python", os.path.join(APP_DIR, "engine", "server.py")]
+    try:
+        try:
+            out = open(log, "wb")
+        except OSError:
+            out = subprocess.DEVNULL
+        subprocess.Popen(cmd, env=env, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                         creationflags=flags, cwd=APP_DIR, close_fds=True, start_new_session=os.name != "nt")
+        print("  Started the updated engine:", " ".join(cmd), flush=True)
+    except Exception as e:
+        traceback.print_exc()
+        STATE["restart_error"] = str(e)
 
 
 # ----------------------------------------------------------------- web
@@ -1320,7 +1329,7 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/ping":
             STATE["last_ping"] = time.time()
             STATE["bye_at"] = None
-            return self._send(200, {"ok": True, "version": APP_VERSION, "boot": BOOT})
+            return self._send(200, {"ok": True, "version": APP_VERSION, "boot": BOOT, "restart_error": STATE.get("restart_error")})
         if p == "/api/status":
             return self._send(200, {"busy": STATE["busy"], "progress": STATE["progress"]})
         if p == "/api/settings":
