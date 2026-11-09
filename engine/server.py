@@ -43,7 +43,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.14.3"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.14.4"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -1343,8 +1343,9 @@ def job_split_plan(cuts=None, suggest=False):
             "printer": list(vol), "lo": [round(float(x), 1) for x in co.min(0)], "hi": [round(float(x), 1) for x in co.max(0)]}
 
 
-def job_split(cuts, open_folder=False):
-    """Cut the model into the parts, with pegs and holes, and save each one."""
+def job_split(cuts, open_folder=False, save=True):
+    """Cut the model into the parts, with pegs and holes, and save each one.
+    With save off, the parts are only made for the view (Pull the parts apart)."""
     latex = _latex()
     settings = load_settings()
     if not cuts:
@@ -1355,7 +1356,7 @@ def job_split(cuts, open_folder=False):
     parts = sp.split(latex, cuts, float(settings["peg_d_mm"]), float(settings["peg_len_mm"]), float(settings["peg_clear_mm"]),
                      report=report, progress=progress)
     folder = STATE["folder"]
-    for f in os.listdir(folder):
+    for f in os.listdir(folder) if save else []:
         if " - part " in f and f.lower().endswith(".stl"):
             os.remove(os.path.join(folder, f))
     # bottom part first, then up
@@ -1369,15 +1370,16 @@ def job_split(cuts, open_folder=False):
     for k, o in enumerate(parts, 1):
         co, tris = ms._world_tris(o)
         name = f"{STATE['name']} - part {k}.stl"
-        ms._write_stl(os.path.join(folder, name), co, tris)
+        if save:
+            ms._write_stl(os.path.join(folder, name), co, tris)
         ms._write_stl(os.path.join(PREVIEW_DIR, f"PART_{k}.stl"), co, tris)
         dims = [round(float(x), 1) for x in np.ptp(co, axis=0)]
         fx, fy = sp._footprint(co[::max(1, len(co) // 20000)], vol=vol)
         fit, over = sp.fits((fx, fy, dims[2]), vol)
-        out.append({"file": name, "dims": [round(fx, 1), round(fy, 1), dims[2]], "fits": fit, "over": over,
+        out.append({"file": name if save else None, "dims": [round(fx, 1), round(fy, 1), dims[2]], "fits": fit, "over": over,
                     "closed": not ms._open_edges(o.data), "url": f"/api/preview/PART_{k}.stl?rev={STATE['split_rev']}"})
         ms._remove(o)
-    if open_folder and out:
+    if save and open_folder and out:
         _show_in_folder(os.path.join(folder, out[0]["file"]))
     progress("Done")
     return {"parts": out, "pegs": report.get("pegs", 0), "no_room": report.get("no_room", []),
@@ -1638,7 +1640,7 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/split_plan":
                 return self._send(200, self._busy(job_split_plan, data.get("cuts"), bool(data.get("suggest"))))
             if p == "/api/split":
-                return self._send(200, self._busy(job_split, data.get("cuts") or [], bool(data.get("open"))))
+                return self._send(200, self._busy(job_split, data.get("cuts") or [], bool(data.get("open")), not data.get("preview")))
             if p == "/api/show_model":
                 path = os.path.join(STATE["folder"] or "", (STATE["name"] or "") + " - model.stl")
                 if not os.path.isfile(path):

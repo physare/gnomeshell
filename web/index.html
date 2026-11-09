@@ -228,7 +228,7 @@
             </div>
           </details>
           <details class="group pnl" id="fitBox" data-in="scan" data-pnl="fit">
-            <summary><span>Fit your printer</span><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="Splits the model itself (not the shell) into parts that each fit your printer. Each cut gets pegs on the part below and matching holes in the part above, so they line up when you glue them. Suggest cuts picks spots where the cut is solid, with room for pegs; drag a cut's slider to move it. Pull the parts apart spreads the model's parts out in the view (the shell doesn't move). The parts are saved as &quot;&lt;name&gt; - part 1.stl&quot; and so on in the scan's folder. Pick your printer on the Settings tab.">?</span><span class="sum-meta mono" id="fitSum"></span></summary>
+            <summary><span>Fit your printer</span><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="Splits the model itself (not the shell) into parts that each fit your printer. Each cut gets pegs on the part below and matching holes in the part above, so they line up when you glue them. Suggest cuts picks spots where the cut is solid, with room for pegs; drag a cut's slider to move it. Pull the parts apart spreads the model's parts out in the view, solid and with their pegs and holes (the shell doesn't move). The parts are saved as &quot;&lt;name&gt; - part 1.stl&quot; and so on in the scan's folder. Pick your printer on the Settings tab.">?</span><span class="sum-meta mono" id="fitSum"></span></summary>
             <div class="group-body">
               <p class="small" id="fitLine"></p>
               <label class="check" for="showPrinter"><input id="showPrinter" type="checkbox" checked> Show the printer's space in the view</label>
@@ -240,7 +240,7 @@
               </div>
               <p class="small muted" id="splitHint" hidden>Each part shows in its own color. Drag a numbered handle in the view, or a slider, to move a cut.</p>
               <div id="splitCuts"></div>
-              <label class="split-spread" id="splitSpreadBox" for="splitSpread" hidden title="Spread the model's parts out to see how they fit together. Only the view moves; the parts aren't changed.">Pull the parts apart<input id="splitSpread" type="range" min="0" max="120" value="0"><span class="mono" id="splitSpreadVal">0 mm</span></label>
+              <label class="split-spread" id="splitSpreadBox" for="splitSpread" hidden title="Spread the model's parts out to see how they fit together, pegs and holes included. Nothing is saved until you press Split and save parts.">Pull the parts apart<input id="splitSpread" type="range" min="0" max="120" value="0"><span class="mono" id="splitSpreadVal">0 mm</span></label>
               <div class="fields">
                 <label for="peg_d_mm">Peg diameter (mm)<input id="peg_d_mm" data-set type="number" step="0.5" min="2" max="30"></label>
                 <label for="peg_len_mm">Peg length (mm)<input id="peg_len_mm" data-set type="number" step="1" min="3" max="60"></label>

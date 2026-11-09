@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.14.3"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.14.4"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -1825,72 +1825,62 @@ function drawPrinter() {
 }
 function cutAxis(cut) { return cut.kind === "x" ? 0 : cut.kind === "y" ? 1 : 2; }
 // Pull the model's own parts apart (not the shell) to see how they go together.
-// Before Split and save, the parts are the model cut where the cuts are; after it,
-// they're the saved parts, pegs and holes and all.
+// It shows the real parts, solid and with their pegs and holes: the engine cuts
+// them (without saving) the first time the slider leaves 0 for these cuts, and
+// Split and save parts makes them too. When a cut moves, the slider goes back to 0.
 // var: go() can run before these lines
 var splitApart = new THREE.Group(); scene.add(splitApart);
 var splitApartKey = null, splitApartTok = 0;
-var splitStl = new Map();
 function splitSpreadMM() { return +$("#splitSpread").value || 0; }
+function splitHaveParts() { return SPLIT.parts.length > 0 && SPLIT.parts.every((p) => p.url); }
 function drawSplitApart() {
   if (!splitApart) return;
   const mm = splitSpreadMM();
   $("#splitSpreadVal").textContent = `${mm} mm`;
   $("#splitSpreadBox").hidden = !SPLIT.cuts.length;
-  const on = !!(mm > 0 && SPLIT.cuts.length && latexMesh && latexTri && S.step === "cut" && S.scan && curTab() === "scan" && !insViewOn() && groups.latex.visible);
+  const on = !!(mm > 0 && SPLIT.cuts.length && splitHaveParts() && latexMesh && latexTri && S.step === "cut" && S.scan && curTab() === "scan" && !insViewOn() && groups.latex.visible);
   if (latexMesh) latexMesh.visible = !on;
   splitApart.visible = on;
   if (!on) return;
   const parts = splitPartOf(); if (!parts) return;
   const { dirs, mids } = splitPartCache;
-  const saved = SPLIT.parts.length && SPLIT.parts.every((p) => p.url);
-  const key = saved ? SPLIT.parts.map((p) => p.url).join() : splitPartCache.key;
+  const key = SPLIT.parts.map((p) => p.url).join();
   if (splitApartKey !== key) {
     splitApartKey = key;
-    splitApart.children.forEach((m) => { if (![...splitStl.values()].includes(m.geometry)) m.geometry.dispose(); m.material.dispose(); });
+    splitApart.children.forEach((m) => { m.geometry.dispose(); m.material.dispose(); });
     splitApart.clear();
     const tok = ++splitApartTok;
-    if (saved) {
-      Promise.all(SPLIT.parts.map((p) => splitStl.get(p.url) || loadSTL(p.url).then((g) => { splitStl.set(p.url, g); return g; }))).then((gs) => {
-        if (tok !== splitApartTok) return;
-        gs.forEach((g, k) => {
-          // match each saved part to the part it came from by where its middle is
-          g.computeBoundingBox(); const c = g.boundingBox.getCenter(new V3());
-          let best = 0, bd = Infinity;
-          mids.forEach((m, j) => { const d = (m[0] - c.x) ** 2 + (m[1] - c.y) ** 2 + (m[2] - c.z) ** 2; if (d < bd) { bd = d; best = j; } });
-          const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: new THREE.Color(pieceColor(k)).lerp(COL.latex, 0.2), roughness: 0.75, metalness: 0 }));
-          mesh.userData.dir = dirs[best] || [0, 0, 0];
-          splitApart.add(mesh);
-        });
-        placeSplitApart();
-      });
-    } else {
-      const pos = latexMesh.geometry.attributes.position.array, col = latexMesh.geometry.attributes.color.array;
-      const count = new Uint32Array(dirs.length);
-      for (let i = 0; i < latexTri.n; i++) count[parts[i]]++;
-      const buf = [...count].map((c) => ({ p: new Float32Array(c * 9), c: new Float32Array(c * 9), at: 0 }));
-      for (let i = 0; i < latexTri.n; i++) {
-        const b = buf[parts[i]];
-        b.p.set(pos.subarray(i * 9, i * 9 + 9), b.at); b.c.set(col.subarray(i * 9, i * 9 + 9), b.at); b.at += 9;
-      }
-      buf.forEach((b, k) => {
-        if (!b.at) return;
-        const g = new THREE.BufferGeometry();
-        g.setAttribute("position", new THREE.BufferAttribute(b.p, 3)); g.setAttribute("color", new THREE.BufferAttribute(b.c, 3));
-        g.computeVertexNormals();
-        const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0, side: THREE.DoubleSide }));
-        mesh.userData.dir = dirs[k];
+    latexMesh.visible = true; // the whole model until the parts are in
+    Promise.all(SPLIT.parts.map((p) => loadSTL(p.url))).then((gs) => {
+      if (tok !== splitApartTok) { gs.forEach((g) => g.dispose()); return; }
+      gs.forEach((g, k) => {
+        // which way each part moves: matched to the part it came from by where its middle is
+        g.computeBoundingBox(); const c = g.boundingBox.getCenter(new V3());
+        let best = 0, bd = Infinity;
+        mids.forEach((m, j) => { const d = (m[0] - c.x) ** 2 + (m[1] - c.y) ** 2 + (m[2] - c.z) ** 2; if (d < bd) { bd = d; best = j; } });
+        const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: new THREE.Color(pieceColor(k)).lerp(COL.latex, 0.2), roughness: 0.75, metalness: 0 }));
+        mesh.userData.dir = dirs[best] || [0, 0, 0];
         splitApart.add(mesh);
       });
-    }
+      drawSplitApart();
+    });
+    return;
   }
-  placeSplitApart();
-}
-function placeSplitApart() {
-  const mm = splitSpreadMM();
+  if (!splitApart.children.length) { latexMesh.visible = true; return; }
   splitApart.children.forEach((m) => { const d = m.userData.dir; m.position.set(d[0] * mm, d[1] * mm, d[2] * mm); });
 }
-$("#splitSpread").addEventListener("input", () => { drawSplitApart(); });
+async function splitMakeParts() {
+  if (!SPLIT.cuts.length || splitHaveParts()) return;
+  const cuts = JSON.stringify(SPLIT.cuts);
+  await withBusy("Cutting the parts with their pegs", async () => {
+    const r = await api("/api/split", { cuts: SPLIT.cuts, preview: true });
+    if (JSON.stringify(SPLIT.cuts) !== cuts) return;
+    SPLIT.parts = r.parts; renderSplitParts();
+  }, true);
+  drawSplitApart();
+}
+$("#splitSpread").addEventListener("input", () => { drawSplitApart(); if (splitSpreadMM() > 0 && !splitHaveParts()) $("#splitSpreadVal").textContent = "…"; });
+$("#splitSpread").addEventListener("change", () => { if (splitSpreadMM() > 0) splitMakeParts(); });
 // which split part each triangle of the model is in, numbered like the parts list (bottom first, then left to right)
 let splitPartCache = { key: null, parts: null };
 // the middle of each triangle of the model, kept while the model stays the same
@@ -1969,6 +1959,7 @@ canvas.addEventListener("pointerdown", (e) => {
   const k = splitHandleAt(e); if (k == null) return;
   e.stopImmediatePropagation(); e.preventDefault();
   const cut = SPLIT.cuts[k], a = cutAxis(cut), p = splitHandlePos(cut);
+  $("#splitSpread").value = 0; // the parts no longer match the cuts
   splitDrag = { k, a, origin: p.clone(), dir: new V3(a === 0 ? 1 : 0, a === 1 ? 1 : 0, a === 2 ? 1 : 0) };
   orbit.enabled = false; canvas.setPointerCapture(e.pointerId);
 }, true);
@@ -2020,6 +2011,7 @@ function renderSplit() {
 }
 let splitT = null;
 function splitChanged() {
+  $("#splitSpread").value = 0; // the parts no longer match the cuts
   drawPrinter();
   SPLIT.parts = []; renderSplitParts();
   clearTimeout(splitT);
@@ -2093,12 +2085,12 @@ $("#splitAddX").onclick = () => addSplitCut("x");
 $("#splitAddY").onclick = () => addSplitCut("y");
 $("#splitSuggest").onclick = () => withBusy("Finding cuts that fit your printer", async () => {
   const r = await api("/api/split_plan", { suggest: true });
-  SPLIT.cuts = r.cuts; SPLIT.parts = r.parts; renderSplit(); drawPrinter();
+  SPLIT.cuts = r.cuts; SPLIT.parts = r.parts; $("#splitSpread").value = 0; renderSplit(); drawPrinter();
   toast(r.cuts.length ? `${r.cuts.length} ${r.cuts.length === 1 ? "cut makes" : "cuts make"} ${r.parts.length} parts that ${r.parts.every((p) => p.fits) ? "all fit" : "mostly fit"} your printer. Move them if you like, then press Split and save parts.` : "The model fits your printer in one piece, so it doesn't need splitting.", true);
 });
 $("#splitGo").onclick = () => withBusy("Splitting the model", async () => {
   const r = await api("/api/split", { cuts: SPLIT.cuts, open: true });
-  SPLIT.parts = r.parts; renderSplitParts();
+  SPLIT.parts = r.parts; renderSplitParts(); drawSplitApart();
   const warn = [...r.no_room.map((k) => `cut ${k} has no room for a peg`), ...r.too_thin.map((k) => `cut ${k} is too thin for a peg`)];
   toast(`Saved ${r.parts.length} parts with ${r.pegs} ${r.pegs === 1 ? "peg" : "pegs"} in the scan's folder${warn.length ? ` (${warn.join(", ")})` : ""}. The folder is opening.`, !warn.length);
 });
@@ -2106,7 +2098,7 @@ $("#showPrinter").onchange = () => drawPrinter();
 
 function drawSizer() {
   const g = groups.sizer;
-  if (S.scan) { if (SPLIT.for !== S.scan.name) { SPLIT.for = S.scan.name; SPLIT.cuts = []; SPLIT.parts = []; spoutReset(); seamReset(); webReset(); } renderSplit(); drawPrinter(); drawSpout(); drawSeamVis(); drawWebVis(); }
+  if (S.scan) { if (SPLIT.for !== S.scan.name) { SPLIT.for = S.scan.name; SPLIT.cuts = []; SPLIT.parts = []; $("#splitSpread").value = 0; spoutReset(); seamReset(); webReset(); } renderSplit(); drawPrinter(); drawSpout(); drawSeamVis(); drawWebVis(); }
   groups.base.visible = !!(S.step === "cut" && S.scan && curTab() === "scan" && !insViewOn());
   g.clear();
   g.visible = sizerOn();

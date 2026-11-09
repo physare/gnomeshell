@@ -106,8 +106,9 @@ USE
          above. Peg diameter, length and hole clearance are set there too.
          Pull the parts apart (under the cuts) spreads the model's parts
          out in the view so you can see how they go together; the shell
-         isn't moved. After Split and save parts it shows the saved
-         parts, pegs and holes included.
+         isn't moved. When you let go of the slider the parts are cut for
+         real (not saved yet), so they show solid with their pegs and
+         holes. Moving a cut puts the slider back to 0.
          When you build, a shell piece too big for the printer is split the
          same way (SHELL_1A, SHELL_1B...), with pegs where the wall is thick
          enough. A cut through a curved wall can leave separate bits; each
