@@ -104,6 +104,10 @@ USE
          saves "<name> - part 1.stl" and so on in the scan's folder, with
          pegs on the part below each cut and matching holes in the part
          above. Peg diameter, length and hole clearance are set there too.
+         Pull the parts apart (under the cuts) spreads the model's parts
+         out in the view so you can see how they go together; the shell
+         isn't moved. After Split and save parts it shows the saved
+         parts, pegs and holes included.
          When you build, a shell piece too big for the printer is split the
          same way (SHELL_1A, SHELL_1B...), with pegs where the wall is thick
          enough. A cut through a curved wall can leave separate bits; each

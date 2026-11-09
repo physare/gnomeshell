@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.14.2"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.14.3"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -1802,6 +1802,7 @@ function drawPrinter() {
   const g = groups.printer;
   g.clear();
   if (latexMesh && latexTri) paint(S.T || { pieces: [] }); // split parts in colour on the Scan tab, pieces elsewhere
+  drawSplitApart();
   g.visible = !!(S.step === "cut" && S.scan && curTab() === "scan" && !insViewOn() && $("#showPrinter").checked);
   if (!g.visible) return;
   const [W, D, H] = printerVol(), c = S.scan.center, sz = (S.scan.size || S.scan.dims).map(Number);
@@ -1823,6 +1824,73 @@ function drawPrinter() {
   $("#splitHint").hidden = !SPLIT.cuts.length;
 }
 function cutAxis(cut) { return cut.kind === "x" ? 0 : cut.kind === "y" ? 1 : 2; }
+// Pull the model's own parts apart (not the shell) to see how they go together.
+// Before Split and save, the parts are the model cut where the cuts are; after it,
+// they're the saved parts, pegs and holes and all.
+// var: go() can run before these lines
+var splitApart = new THREE.Group(); scene.add(splitApart);
+var splitApartKey = null, splitApartTok = 0;
+var splitStl = new Map();
+function splitSpreadMM() { return +$("#splitSpread").value || 0; }
+function drawSplitApart() {
+  if (!splitApart) return;
+  const mm = splitSpreadMM();
+  $("#splitSpreadVal").textContent = `${mm} mm`;
+  $("#splitSpreadBox").hidden = !SPLIT.cuts.length;
+  const on = !!(mm > 0 && SPLIT.cuts.length && latexMesh && latexTri && S.step === "cut" && S.scan && curTab() === "scan" && !insViewOn() && groups.latex.visible);
+  if (latexMesh) latexMesh.visible = !on;
+  splitApart.visible = on;
+  if (!on) return;
+  const parts = splitPartOf(); if (!parts) return;
+  const { dirs, mids } = splitPartCache;
+  const saved = SPLIT.parts.length && SPLIT.parts.every((p) => p.url);
+  const key = saved ? SPLIT.parts.map((p) => p.url).join() : splitPartCache.key;
+  if (splitApartKey !== key) {
+    splitApartKey = key;
+    splitApart.children.forEach((m) => { if (![...splitStl.values()].includes(m.geometry)) m.geometry.dispose(); m.material.dispose(); });
+    splitApart.clear();
+    const tok = ++splitApartTok;
+    if (saved) {
+      Promise.all(SPLIT.parts.map((p) => splitStl.get(p.url) || loadSTL(p.url).then((g) => { splitStl.set(p.url, g); return g; }))).then((gs) => {
+        if (tok !== splitApartTok) return;
+        gs.forEach((g, k) => {
+          // match each saved part to the part it came from by where its middle is
+          g.computeBoundingBox(); const c = g.boundingBox.getCenter(new V3());
+          let best = 0, bd = Infinity;
+          mids.forEach((m, j) => { const d = (m[0] - c.x) ** 2 + (m[1] - c.y) ** 2 + (m[2] - c.z) ** 2; if (d < bd) { bd = d; best = j; } });
+          const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: new THREE.Color(pieceColor(k)).lerp(COL.latex, 0.2), roughness: 0.75, metalness: 0 }));
+          mesh.userData.dir = dirs[best] || [0, 0, 0];
+          splitApart.add(mesh);
+        });
+        placeSplitApart();
+      });
+    } else {
+      const pos = latexMesh.geometry.attributes.position.array, col = latexMesh.geometry.attributes.color.array;
+      const count = new Uint32Array(dirs.length);
+      for (let i = 0; i < latexTri.n; i++) count[parts[i]]++;
+      const buf = [...count].map((c) => ({ p: new Float32Array(c * 9), c: new Float32Array(c * 9), at: 0 }));
+      for (let i = 0; i < latexTri.n; i++) {
+        const b = buf[parts[i]];
+        b.p.set(pos.subarray(i * 9, i * 9 + 9), b.at); b.c.set(col.subarray(i * 9, i * 9 + 9), b.at); b.at += 9;
+      }
+      buf.forEach((b, k) => {
+        if (!b.at) return;
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(b.p, 3)); g.setAttribute("color", new THREE.BufferAttribute(b.c, 3));
+        g.computeVertexNormals();
+        const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0, side: THREE.DoubleSide }));
+        mesh.userData.dir = dirs[k];
+        splitApart.add(mesh);
+      });
+    }
+  }
+  placeSplitApart();
+}
+function placeSplitApart() {
+  const mm = splitSpreadMM();
+  splitApart.children.forEach((m) => { const d = m.userData.dir; m.position.set(d[0] * mm, d[1] * mm, d[2] * mm); });
+}
+$("#splitSpread").addEventListener("input", () => { drawSplitApart(); });
 // which split part each triangle of the model is in, numbered like the parts list (bottom first, then left to right)
 let splitPartCache = { key: null, parts: null };
 // the middle of each triangle of the model, kept while the model stays the same
@@ -1843,7 +1911,7 @@ function splitPartOf() {
   if (!SPLIT.cuts.length || !latexMesh || !latexTri) return null;
   const key = latexMesh.uuid + JSON.stringify(SPLIT.cuts.map((c) => [c.kind, c.point[cutAxis(c)], c.band, c.within]));
   if (splitPartCache.key === key) return splitPartCache.parts;
-  const C = splitCentroids(), n = latexTri.n, keys = new Uint32Array(n), info = new Map(), lv = splitLevels();
+  const C = splitCentroids(), n = latexTri.n, keys = new Uint32Array(n), app = new Uint32Array(n), info = new Map(), lv = splitLevels();
   // level cuts first, right through; an upright cut can be kept to one level, or one side of another cut
   const seq = SPLIT.cuts.map((_, j) => j).sort((a, b) => (cutAxis(SPLIT.cuts[a]) !== 2) - (cutAxis(SPLIT.cuts[b]) !== 2));
   for (const j of seq) {
@@ -1860,7 +1928,7 @@ function splitPartOf() {
         ok.set(k, yes);
       }
     }
-    for (let i = 0; i < n; i++) if ((!ok || ok.get(keys[i])) && C[i * 3 + ax] < at) keys[i] |= bit;
+    for (let i = 0; i < n; i++) if (!ok || ok.get(keys[i])) { app[i] |= bit; if (C[i * 3 + ax] < at) keys[i] |= bit; }
   }
   for (let i = 0; i < n; i++) {
     const k = keys[i], r = info.get(k), x = C[i * 3], z = C[i * 3 + 2];
@@ -1869,7 +1937,17 @@ function splitPartOf() {
   const order = [...info.entries()].sort((a, b) => (Math.round(a[1].z / 5) - Math.round(b[1].z / 5)) || (a[1].x - b[1].x)).map((e) => e[0]);
   const idx = new Map(order.map((k, i) => [k, i])), parts = new Uint16Array(n);
   for (let i = 0; i < n; i++) parts[i] = idx.get(keys[i]);
-  splitPartCache = { key, parts };
+  // which way each part moves when they're pulled apart: half a step away from each cut it touches,
+  // so every cut opens up by the slider's amount and the parts stay in line
+  const dirs = order.map(() => [0, 0, 0]), mid = order.map(() => [0, 0, 0, 0]), seen = new Set();
+  for (let i = 0; i < n; i++) {
+    const k = parts[i], m = mid[k];
+    m[0] += C[i * 3]; m[1] += C[i * 3 + 1]; m[2] += C[i * 3 + 2]; m[3]++;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    SPLIT.cuts.forEach((cut, j) => { if (app[i] & (1 << j)) dirs[k][cutAxis(cut)] += keys[i] & (1 << j) ? -0.5 : 0.5; });
+  }
+  splitPartCache = { key, parts, dirs, mids: mid.map((m) => [m[0] / m[3], m[1] / m[3], m[2] / m[3]]) };
   return parts;
 }
 // a handle per split cut, beside the model, to drag the cut along its axis
@@ -2468,6 +2546,7 @@ function go(step) {
   $("#labels").hidden = step !== "cut";
   $("#doneTools").hidden = step !== "done"; $("#spreadBox").hidden = step !== "done" || S.show === "plates";
   groups.latex.visible = step === "cut" || (step === "done" && S.show === "latex");
+  drawSplitApart(); // the model's own pulled-apart parts show only on the Scan tab
   groups.slicePlan.visible = step === "cut" && $("#tSlices").checked;
   groups.pour.visible = step === "cut" && $("#tPour").checked;
   groups.insert.visible = step === "cut" && !!S.insert?.on;
@@ -3584,7 +3663,7 @@ $("#insOnly").onclick = () => {
 };
 
 // for testing
-window.__ms = { showTab, splitPartOf, SPLIT, SEAM, drawSlicePlan, sliceDragStart, curTab, sizerAt, drawSizer, sizerOn, baseH, setBaseH, latexDistance, INS, S, insCentre: (T) => insCentreOnOpening(T), insFit, insAutoFit, insHandleAt, setInsView, insViewOn, insThinnest, insLayout, drawInsert, insSpec, loadRecent, frameGroup, slicePlans, startBuild, pickAt, pieceSpec, refresh, compute, splitPieces, splitNormal, pickAllPieces, mirrorCuts, mirrorPlane, applyLayout, layoutNow, labels: () => labels, renderCuts, camera, groups, removeCut, deleteSegs, deleteCuts, mergePieces, optimize, undo, redo, setMode, selectSeg, selectPiece, selectCut, H, meshes, handle, gizmoT, gizmoR, onHandleMove };
+window.__ms = { showTab, splitPartOf, SPLIT, splitApart: () => splitApart, SEAM, drawSlicePlan, sliceDragStart, curTab, sizerAt, drawSizer, sizerOn, baseH, setBaseH, latexDistance, INS, S, insCentre: (T) => insCentreOnOpening(T), insFit, insAutoFit, insHandleAt, setInsView, insViewOn, insThinnest, insLayout, drawInsert, insSpec, loadRecent, frameGroup, slicePlans, startBuild, pickAt, pieceSpec, refresh, compute, splitPieces, splitNormal, pickAllPieces, mirrorCuts, mirrorPlane, applyLayout, layoutNow, labels: () => labels, renderCuts, camera, groups, removeCut, deleteSegs, deleteCuts, mergePieces, optimize, undo, redo, setMode, selectSeg, selectPiece, selectCut, H, meshes, handle, gizmoT, gizmoR, onHandleMove };
 
 // ------------------------------------------------------------ tooltips and panels
 // Hover anything with a title (or a ? icon) for a tooltip; long help lives there, not in the panel.
