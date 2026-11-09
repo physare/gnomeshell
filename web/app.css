@@ -576,3 +576,8 @@ body.no-panel .panel { display: none; }
 .split-spread { display: grid; grid-template-columns: auto minmax(0, 1fr) 52px; align-items: center; gap: 10px; margin: 8px 0; }
 .split-spread[hidden] { display: none; }
 .split-spread .mono { text-align: right; }
+.split-cut.shape { grid-template-columns: minmax(0, 1fr) 30px; }
+.draw-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; margin: 8px 0 4px; }
+.draw-row .seg3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+#drawLayer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+#drawLayer polygon { fill: rgba(240, 160, 64, 0.12); stroke: #f0a040; stroke-width: 1.5; stroke-dasharray: 5 4; }

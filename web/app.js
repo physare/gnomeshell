@@ -6,7 +6,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.14.4"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.14.5"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -1803,6 +1803,7 @@ function drawPrinter() {
   g.clear();
   if (latexMesh && latexTri) paint(S.T || { pieces: [] }); // split parts in colour on the Scan tab, pieces elsewhere
   drawSplitApart();
+  if (SPLIT.draw && (S.step !== "cut" || curTab() !== "scan")) setDrawMode(SPLIT.draw); // drawing is for the Scan tab
   g.visible = !!(S.step === "cut" && S.scan && curTab() === "scan" && !insViewOn() && $("#showPrinter").checked);
   if (!g.visible) return;
   const [W, D, H] = printerVol(), c = S.scan.center, sz = (S.scan.size || S.scan.dims).map(Number);
@@ -1811,6 +1812,7 @@ function drawPrinter() {
   const box = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(W, D, H)), new THREE.LineBasicMaterial({ color: ok ? "#7fc89a" : "#f08a70", transparent: true, opacity: 0.75 }));
   box.position.set(c[0], c[1], z0 + H / 2); g.add(box);
   SPLIT.cuts.forEach((cut, k) => {
+    if (cut.kind === "shape") { drawShapeCut(g, cut, k); return; }
     const p = splitHandlePos(cut), r = Math.max(2.5, size() * 0.022), a = cutAxis(cut);
     const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), new THREE.MeshBasicMaterial({ color: "#f0a040", depthTest: false }));
     ball.position.copy(p); ball.renderOrder = 12; ball.userData.splitCut = k;
@@ -1823,7 +1825,135 @@ function drawPrinter() {
   });
   $("#splitHint").hidden = !SPLIT.cuts.length;
 }
-function cutAxis(cut) { return cut.kind === "x" ? 0 : cut.kind === "y" ? 1 : 2; }
+function cutAxis(cut) { return cut.kind === "shape" ? -1 : cut.kind === "x" ? 0 : cut.kind === "y" ? 1 : 2; }
+// ---- cuts drawn on the view: a free line, a box or an ellipse. The outline goes
+// straight through the model the way the view looked; what's inside is a part of its own.
+function shapeBasis(cut) {
+  const n = new V3(...cut.normal).normalize(), a = Math.abs(n.x) < 0.9 ? new V3(1, 0, 0) : new V3(0, 1, 0);
+  const u = n.clone().cross(a).normalize(), v = n.clone().cross(u);
+  const o = new V3(...cut.point);
+  const poly = cut.pts.map((q) => { const d = new V3(...q).sub(o); return [d.dot(u), d.dot(v)]; });
+  return { n, u, v, o, poly };
+}
+function pointInPoly(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+// which triangles of the model are inside a drawn cut
+function shapeInside(cut) {
+  const C = splitCentroids(), n = latexTri.n, B = shapeBasis(cut), out = new Uint8Array(n);
+  const { u, v, o, poly } = B;
+  for (let i = 0; i < n; i++) {
+    const dx = C[i * 3] - o.x, dy = C[i * 3 + 1] - o.y, dz = C[i * 3 + 2] - o.z;
+    out[i] = pointInPoly(dx * u.x + dy * u.y + dz * u.z, dx * v.x + dy * v.y + dz * v.z, poly) ? 1 : 0;
+  }
+  return out;
+}
+// the outline in front of and behind the model, joined at a few corners
+function drawShapeCut(g, cut, k) {
+  const { n } = shapeBasis(cut), sz = (S.scan.size || S.scan.dims).map(Number);
+  const R = (Math.abs(n.x) * sz[0] + Math.abs(n.y) * sz[1] + Math.abs(n.z) * sz[2]) / 2 + 4; // just past the model, front and back
+  const ring = (t) => cut.pts.map((q) => new V3(...q).addScaledVector(n, t));
+  const a = ring(-R), b = ring(R), segs = [];
+  for (let i = 0; i < a.length; i++) { const j = (i + 1) % a.length; segs.push(a[i], a[j], b[i], b[j]); }
+  const step = Math.max(1, Math.floor(a.length / 4));
+  for (let i = 0; i < a.length; i += step) segs.push(a[i], b[i]);
+  const line = new THREE.LineSegments(lineGeometry(segs), new THREE.LineBasicMaterial({ color: "#f0a040", transparent: true, opacity: 0.85 }));
+  line.renderOrder = 12;
+  const r = Math.max(2.5, size() * 0.022), tag = textSprite(String(k + 1), r * 1.6);
+  tag.position.copy(a[0]);
+  g.add(line, tag);
+}
+const SHAPE_NAMES = { free: "free line", box: "box", ellipse: "ellipse" };
+var shapeDraw = null; // { kind, pts: [[x, y] on screen], start }
+function setDrawMode(kind) {
+  SPLIT.draw = SPLIT.draw === kind ? null : kind;
+  $$("[data-draw]").forEach((b) => { b.classList.toggle("on", b.dataset.draw === SPLIT.draw); b.setAttribute("aria-pressed", b.dataset.draw === SPLIT.draw); });
+  canvas.style.cursor = SPLIT.draw ? "crosshair" : "";
+  $("#drawHint").hidden = !SPLIT.draw;
+  if (!SPLIT.draw) { shapeDraw = null; drawOverlay(); }
+}
+function drawOverlay() {
+  let svg = $("#drawLayer");
+  if (!svg) {
+    svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.id = "drawLayer";
+    canvas.parentElement.appendChild(svg);
+  }
+  const pts = shapeOutline();
+  svg.innerHTML = pts && pts.length > 1 ? `<polygon points="${pts.map((q) => q.join(",")).join(" ")}"/>` : "";
+}
+// the outline being drawn, in screen pixels relative to the canvas
+function shapeOutline() {
+  if (!shapeDraw) return null;
+  const P = shapeDraw.pts;
+  if (shapeDraw.kind === "free") return P;
+  const [a, b] = [P[0], P[P.length - 1]];
+  if (shapeDraw.kind === "box") return [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]];
+  const cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2, rx = Math.abs(b[0] - a[0]) / 2, ry = Math.abs(b[1] - a[1]) / 2;
+  return [...Array(48)].map((_, i) => [cx + rx * Math.cos(i / 48 * 2 * Math.PI), cy + ry * Math.sin(i / 48 * 2 * Math.PI)]);
+}
+function segsCross(p, q, r, s) {
+  const d = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  return d(p, q, r) * d(p, q, s) < 0 && d(r, s, p) * d(r, s, q) < 0;
+}
+function finishShape() {
+  let P = shapeOutline(); const kind = shapeDraw.kind;
+  shapeDraw = null; drawOverlay();
+  if (!P || P.length < 3) return;
+  const xs = P.map((q) => q[0]), ys = P.map((q) => q[1]);
+  if (Math.max(...xs) - Math.min(...xs) < 8 || Math.max(...ys) - Math.min(...ys) < 8) return toast("That shape is too small. Drag a bigger one.");
+  if (kind === "free") {
+    // fewer points, and the line must not cross itself
+    const keep = [P[0]];
+    for (const q of P) { const l = keep[keep.length - 1]; if (Math.hypot(q[0] - l[0], q[1] - l[1]) >= 5) keep.push(q); }
+    while (keep.length > 160) for (let i = keep.length - 2; i > 0; i -= 2) keep.splice(i, 1);
+    P = keep;
+    if (P.length < 3) return;
+    for (let i = 0; i < P.length; i++) for (let j = i + 2; j < P.length; j++) {
+      if (i === 0 && j === P.length - 1) continue;
+      if (segsCross(P[i], P[(i + 1) % P.length], P[j], P[(j + 1) % P.length])) return toast("The line crosses itself. Draw it again as one loop that doesn't cross.");
+    }
+  }
+  // onto a plane through the middle of the model, square to the view
+  const n = camera.getWorldDirection(new V3()), mid = new V3(...S.scan.center);
+  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, mid), r = canvas.getBoundingClientRect(), hit = new V3(), pts = [];
+  for (const [x, y] of P) {
+    ray.setFromCamera(new THREE.Vector2(x / r.width * 2 - 1, -(y / r.height) * 2 + 1), camera);
+    if (!ray.ray.intersectPlane(plane, hit)) return toast("Turn the view to face the model, then draw again.");
+    pts.push(hit.toArray().map((v) => Math.round(v * 10) / 10));
+  }
+  const cut = { kind: "shape", shape: kind, point: mid.toArray().map((v) => Math.round(v * 10) / 10), normal: n.toArray().map((v) => Math.round(v * 1e4) / 1e4), pts };
+  const inn = shapeInside(cut); let k = 0; for (let i = 0; i < inn.length; i++) k += inn[i];
+  if (!k || k === inn.length) return toast(k ? "That shape goes round the whole model, so it wouldn't cut anything." : "That shape misses the model. Draw it over the part you want to cut out.");
+  SPLIT.cuts.push(cut);
+  setDrawMode(null);
+  renderSplit(); splitChanged();
+}
+canvas.addEventListener("pointerdown", (e) => {
+  if (!SPLIT.draw || e.button !== 0 || S.step !== "cut" || curTab() !== "scan" || !S.scan) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  const r = canvas.getBoundingClientRect();
+  shapeDraw = { kind: SPLIT.draw, pts: [[e.clientX - r.left, e.clientY - r.top]] };
+  orbit.enabled = false; canvas.setPointerCapture(e.pointerId);
+}, true);
+canvas.addEventListener("pointermove", (e) => {
+  if (!shapeDraw) return;
+  e.stopImmediatePropagation();
+  const r = canvas.getBoundingClientRect();
+  shapeDraw.pts.push([e.clientX - r.left, e.clientY - r.top]);
+  drawOverlay();
+}, true);
+canvas.addEventListener("pointerup", (e) => {
+  if (!shapeDraw) return;
+  e.stopImmediatePropagation();
+  orbit.enabled = true;
+  finishShape();
+}, true);
+addEventListener("keydown", (e) => { if (e.key === "Escape" && SPLIT.draw) { setDrawMode(null); e.stopImmediatePropagation(); } }, true);
 // Pull the model's own parts apart (not the shell) to see how they go together.
 // It shows the real parts, solid and with their pegs and holes: the engine cuts
 // them (without saving) the first time the slider leaves 0 for these cuts, and
@@ -1899,13 +2029,15 @@ function bandName(b, lv) { return b === 0 ? "bottom level" : b === lv.length ? "
 function sideName(w, s) { const o = SPLIT.cuts[w]; if (!o) return ""; return `${cutAxis(o) === 0 ? (s > 0 ? "right" : "left") : (s > 0 ? "back" : "front")} of cut ${w + 1}`; }
 function splitPartOf() {
   if (!SPLIT.cuts.length || !latexMesh || !latexTri) return null;
-  const key = latexMesh.uuid + JSON.stringify(SPLIT.cuts.map((c) => [c.kind, c.point[cutAxis(c)], c.band, c.within]));
+  const key = latexMesh.uuid + JSON.stringify(SPLIT.cuts.map((c) => c.kind === "shape" ? [c.kind, c.pts] : [c.kind, c.point[cutAxis(c)], c.band, c.within]));
   if (splitPartCache.key === key) return splitPartCache.parts;
   const C = splitCentroids(), n = latexTri.n, keys = new Uint32Array(n), app = new Uint32Array(n), info = new Map(), lv = splitLevels();
   // level cuts first, right through; an upright cut can be kept to one level, or one side of another cut
-  const seq = SPLIT.cuts.map((_, j) => j).sort((a, b) => (cutAxis(SPLIT.cuts[a]) !== 2) - (cutAxis(SPLIT.cuts[b]) !== 2));
+  const rank = (c) => c.kind === "shape" ? 2 : cutAxis(c) === 2 ? 0 : 1;
+  const seq = SPLIT.cuts.map((_, j) => j).sort((a, b) => rank(SPLIT.cuts[a]) - rank(SPLIT.cuts[b]));
   for (const j of seq) {
     const cut = SPLIT.cuts[j], ax = cutAxis(cut), at = cut.point[ax], bit = 1 << j;
+    if (cut.kind === "shape") { const inn = shapeInside(cut); for (let i = 0; i < n; i++) { app[i] |= bit; if (inn[i]) keys[i] |= bit; } continue; }
     let ok = null;
     if (ax !== 2 && ((cut.band != null && lv.length) || (cut.within || []).length)) {
       const sum = new Map();
@@ -1935,7 +2067,17 @@ function splitPartOf() {
     m[0] += C[i * 3]; m[1] += C[i * 3 + 1]; m[2] += C[i * 3 + 2]; m[3]++;
     if (seen.has(k)) continue;
     seen.add(k);
-    SPLIT.cuts.forEach((cut, j) => { if (app[i] & (1 << j)) dirs[k][cutAxis(cut)] += keys[i] & (1 << j) ? -0.5 : 0.5; });
+    SPLIT.cuts.forEach((cut, j) => {
+      if (!(app[i] & (1 << j))) return;
+      if (cut.kind !== "shape") { dirs[k][cutAxis(cut)] += keys[i] & (1 << j) ? -0.5 : 0.5; return; }
+      // a drawn cut: the part inside comes out toward the side it's on, or toward you if it's in the middle
+      if (!(keys[i] & (1 << j))) return;
+      const B = shapeBasis(cut), { n: nn, o, poly } = B;
+      const cx = poly.reduce((t, q) => t + q[0], 0) / poly.length, cy = poly.reduce((t, q) => t + q[1], 0) / poly.length;
+      const mc = new V3(...S.scan.center).sub(o), w = B.u.clone().multiplyScalar(cx - mc.dot(B.u)).addScaledVector(B.v, cy - mc.dot(B.v));
+      const d = w.length() > size() * 0.08 ? w.normalize() : nn.clone().negate();
+      dirs[k][0] += d.x; dirs[k][1] += d.y; dirs[k][2] += d.z;
+    });
   }
   splitPartCache = { key, parts, dirs, mids: mid.map((m) => [m[0] / m[3], m[1] / m[3], m[2] / m[3]]) };
   return parts;
@@ -1949,7 +2091,7 @@ function splitHandlePos(cut) {
     new V3(c[0] + sz[0] / 2 + m, c[1] - sz[1] / 2 - m, cut.point[2]);
 }
 function splitHandleAt(e) {
-  if (S.step !== "cut" || curTab() !== "scan" || !groups.printer.visible || !SPLIT.cuts.length || e.button !== 0) return null;
+  if (SPLIT.draw || S.step !== "cut" || curTab() !== "scan" || !groups.printer.visible || !SPLIT.cuts.length || e.button !== 0) return null;
   setRay(e);
   const hit = ray.intersectObjects(groups.printer.children.filter((o) => o.userData.splitCut != null), false)[0];
   return hit ? hit.object.userData.splitCut : null;
@@ -1995,6 +2137,7 @@ function renderSplit() {
     : `<span class="ok">The model fits in one piece.</span>`);
   const c = S.scan.center, sz = (S.scan.size || S.scan.dims).map(Number), lv = splitLevels();
   $("#splitCuts").innerHTML = SPLIT.cuts.map((cut, k) => {
+    if (cut.kind === "shape") return `<div class="split-cut shape" data-k="${k}"><span>Cut ${k + 1} · drawn ${SHAPE_NAMES[cut.shape] || "shape"}</span><button type="button" class="btn sm" title="Remove this cut">×</button></div>`;
     const a = cutAxis(cut), lo = Math.floor(c[a] - sz[a] / 2 - (a === 2 ? baseH() : 0)), hi = Math.ceil(c[a] + sz[a] / 2);
     const lab = cut.kind === "x" ? "upright, across" : cut.kind === "y" ? "upright, front-back" : "level";
     let scope = "";
@@ -2081,6 +2224,7 @@ function addSplitCut(kind) {
   renderSplit(); splitChanged();
 }
 $("#splitAdd").onclick = () => addSplitCut("level");
+$$("[data-draw]").forEach((b) => b.onclick = () => setDrawMode(b.dataset.draw));
 $("#splitAddX").onclick = () => addSplitCut("x");
 $("#splitAddY").onclick = () => addSplitCut("y");
 $("#splitSuggest").onclick = () => withBusy("Finding cuts that fit your printer", async () => {
@@ -3655,7 +3799,7 @@ $("#insOnly").onclick = () => {
 };
 
 // for testing
-window.__ms = { showTab, splitPartOf, SPLIT, splitApart: () => splitApart, SEAM, drawSlicePlan, sliceDragStart, curTab, sizerAt, drawSizer, sizerOn, baseH, setBaseH, latexDistance, INS, S, insCentre: (T) => insCentreOnOpening(T), insFit, insAutoFit, insHandleAt, setInsView, insViewOn, insThinnest, insLayout, drawInsert, insSpec, loadRecent, frameGroup, slicePlans, startBuild, pickAt, pieceSpec, refresh, compute, splitPieces, splitNormal, pickAllPieces, mirrorCuts, mirrorPlane, applyLayout, layoutNow, labels: () => labels, renderCuts, camera, groups, removeCut, deleteSegs, deleteCuts, mergePieces, optimize, undo, redo, setMode, selectSeg, selectPiece, selectCut, H, meshes, handle, gizmoT, gizmoR, onHandleMove };
+window.__ms = { showTab, splitPartOf, SPLIT, splitApart: () => splitApart, setDrawMode, SEAM, drawSlicePlan, sliceDragStart, curTab, sizerAt, drawSizer, sizerOn, baseH, setBaseH, latexDistance, INS, S, insCentre: (T) => insCentreOnOpening(T), insFit, insAutoFit, insHandleAt, setInsView, insViewOn, insThinnest, insLayout, drawInsert, insSpec, loadRecent, frameGroup, slicePlans, startBuild, pickAt, pieceSpec, refresh, compute, splitPieces, splitNormal, pickAllPieces, mirrorCuts, mirrorPlane, applyLayout, layoutNow, labels: () => labels, renderCuts, camera, groups, removeCut, deleteSegs, deleteCuts, mergePieces, optimize, undo, redo, setMode, selectSeg, selectPiece, selectCut, H, meshes, handle, gizmoT, gizmoR, onHandleMove };
 
 // ------------------------------------------------------------ tooltips and panels
 // Hover anything with a title (or a ? icon) for a tooltip; long help lives there, not in the panel.

@@ -205,8 +205,130 @@ def _footprint(co, angle_steps=18, vol=None):
     return fit or best
 
 
+def _is_shape(c):
+    """A cut drawn on the view (free line, box or ellipse): everything inside
+    the outline, straight through the model the way the view looked, is cut out."""
+    return c.get("kind") == "shape"
+
+
 def _is_level(c):
-    return abs(float(c["normal"][2])) > 0.9
+    return not _is_shape(c) and abs(float(c["normal"][2])) > 0.9
+
+
+def _shape2d(c):
+    """A drawn cut's outline in its own plane: (look direction, u, v, origin, 2D points)."""
+    n, u, v = _basis(c["normal"])
+    p0 = np.array(c["point"], float)
+    P = np.array(c["pts"], float) - p0
+    return n, u, v, p0, np.stack([P @ np.array(u), P @ np.array(v)], 1)
+
+
+def _pip(xy, poly):
+    """Which 2D points are inside the polygon (even-odd rule)."""
+    x, y = xy[:, 0], xy[:, 1]
+    inside = np.zeros(len(xy), bool)
+    j = len(poly) - 1
+    with np.errstate(divide="ignore", invalid="ignore"):
+        for i in range(len(poly)):
+            (xi, yi), (xj, yj) = poly[i], poly[j]
+            inside ^= ((yi > y) != (yj > y)) & (x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+            j = i
+    return inside
+
+
+def in_shape(c, pts):
+    """Which points are inside a drawn cut (looking along its direction)."""
+    n, u, v, p0, poly = _shape2d(c)
+    d = np.asarray(pts, float) - p0
+    return _pip(np.stack([d @ np.array(u), d @ np.array(v)], 1), poly)
+
+
+def _prism(c, size):
+    """The drawn outline pushed straight through, both ways, as a closed solid."""
+    n, u, v, p0, poly = _shape2d(c)
+    bm = bmesh.new()
+    lo = [bm.verts.new(Vector(p0) + u * float(x) + v * float(y) - n * size) for x, y in poly]
+    hi = [bm.verts.new(Vector(p0) + u * float(x) + v * float(y) + n * size) for x, y in poly]
+    k = len(poly)
+    bm.faces.new(lo)
+    bm.faces.new(list(reversed(hi)))
+    for i in range(k):
+        j = (i + 1) % k
+        bm.faces.new((lo[i], lo[j], hi[j], hi[i]))
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    return ms._new_obj("ms_tmp_prism", bm)
+
+
+def _shape_spots(co, tris, c, peg_d, most=3, step=1.5):
+    """Where pegs go on a drawn cut's wall, each with the way it points (out of
+    the outline). A spot needs solid model round it: peg_d/2 + 2 mm each way
+    along the look direction and along the outline."""
+    n, u, v, p0, poly = _shape2d(c)
+    r = peg_d / 2
+    need = r + 2.0
+    tree = BVHTree.FromPolygons([tuple(x) for x in co], [tuple(t) for t in tris])
+    R = float(np.ptp(co, axis=0).max()) * 2 + 10
+    # outward side: the outline's turn (anticlockwise or not)
+    area = 0.5 * float(np.sum(poly[:, 0] * np.roll(poly[:, 1], -1) - np.roll(poly[:, 0], -1) * poly[:, 1]))
+    ccw = area > 0
+    edges = np.roll(poly, -1, axis=0) - poly
+    L = np.linalg.norm(edges, axis=1)
+    total = float(L.sum())
+    if total < 1:
+        return []
+    cum = np.concatenate([[0.0], np.cumsum(L)])
+    samples = []
+    for k in range(int(total / step)):
+        sdist = k * step
+        e = min(int(np.searchsorted(cum, sdist, side="right")) - 1, len(L) - 1)
+        if L[e] < 1e-9:
+            continue
+        t = edges[e] / L[e]
+        q = poly[e] + t * (sdist - cum[e])
+        m2 = np.array([t[1], -t[0]]) if ccw else np.array([-t[1], t[0]])
+        Q = Vector(p0) + u * float(q[0]) + v * float(q[1])
+        # solid stretches along the look direction through this point of the outline
+        hits, o, gone = [], Q - n * R, 0.0
+        for _ in range(64):
+            h = tree.ray_cast(o, n, 2 * R - gone + 1)
+            if h[0] is None:
+                break
+            gone += (h[0] - o).length
+            hits.append(gone - R)
+            o = h[0] + n * 0.01
+            gone += 0.01
+        segs = [(hits[i], hits[i + 1]) for i in range(0, len(hits) - 1, 2)]
+        samples.append((sdist, Q, Vector((u * float(m2[0]) + v * float(m2[1])).normalized()), segs))
+    if not samples:
+        return []
+    N = len(samples)
+    reach = int(math.ceil(need / step))
+    cands = []
+    for i, (sd, Q, m, segs) in enumerate(samples):
+        for a, b in segs:
+            if b - a < 2 * need:
+                continue
+            mid = (a + b) / 2
+            ok = True
+            for d in range(1, reach + 1):
+                for j in ((i + d) % N, (i - d) % N):
+                    if not any(a2 <= mid - need and b2 >= mid + need for a2, b2 in samples[j][3]):
+                        ok = False
+                        break
+                if not ok:
+                    break
+            if ok:
+                cands.append((min(mid - a, b - mid), Q + n * mid, m))
+    cands.sort(key=lambda x: -x[0])
+    apart = max(3 * peg_d, total / 6)
+    got = []
+    for sc, P, m in cands:
+        if all((P - g[0]).length >= apart for g in got):
+            got.append((P, m))
+            if len(got) >= most:
+                break
+    return got
 
 
 def _levels(cuts):
@@ -225,14 +347,14 @@ def _band(z, levels):
 def _order(cuts):
     """Level cuts first (they go right through), then the upright ones, which
     may only cut one band."""
-    return sorted(range(len(cuts)), key=lambda k: not _is_level(cuts[k]))
+    return sorted(range(len(cuts)), key=lambda k: 2 if _is_shape(cuts[k]) else 0 if _is_level(cuts[k]) else 1)
 
 
 def _applies(c, pts, levels, cuts):
     """Does this cut go through the part with these points? A level cut goes
     through everything. An upright one can be kept to one band ("band") and
     to one side of other upright cuts ("within": [[cut index, +1 or -1]])."""
-    if _is_level(c) or not len(pts):
+    if _is_shape(c) or _is_level(c) or not len(pts):
         return True
     b = c.get("band")
     if b is not None and len(levels) and _band(pts[:, 2], levels) != int(b):
@@ -255,7 +377,7 @@ def part_sizes(co, cuts, vol=None):
     for k in _order(cuts):
         c = cuts[k]
         p, n = np.array(c["point"], float), np.array(c["normal"], float)
-        side = (co - p) @ n >= 0
+        side = in_shape(c, co) if _is_shape(c) else (co - p) @ n >= 0
         new = []
         for g in groups:
             if not _applies(c, co[g], levels, cuts):
@@ -449,6 +571,36 @@ def split(obj, cuts, peg_d=8.0, peg_len=10.0, clear=0.2, report=None, progress=N
             progress(f"Cutting {step + 1} of {len(cuts)}")
         p, n = Vector(c["point"]), Vector(c["normal"]).normalized()
         nxt = []
+        if _is_shape(c):
+            for part in parts:
+                co, tris = ms._world_tris(part)
+                inn = in_shape(c, co)
+                if inn.all() or not inn.any():
+                    nxt.append(part)  # this drawn cut misses this part
+                    continue
+                spots = _shape_spots(co, tris, c, peg_d) if pegs_on else []
+                pr = _prism(c, size)
+                inside = part.copy()
+                inside.data = part.data.copy()
+                ms._collection().objects.link(inside)
+                ms._fast_bool(inside, pr, "INTERSECT")
+                ms._fast_bool(part, pr, "DIFFERENCE")
+                ms._remove(pr)
+                if pegs_on:
+                    # a peg on the part inside the outline, pointing out into a hole in the part round it
+                    done = [_add_pegs(inside, part, [q], m, peg_len, r, clear) for q, m in spots]
+                    if not spots:
+                        report.setdefault("no_room", []).append(k + 1)
+                    elif not any(done):
+                        report.setdefault("too_thin", []).append(k + 1)
+                    pegs += sum(x or 0 for x in done)
+                for o in (inside, part):
+                    if len(o.data.polygons) and ms._volume(o) > 1.0:
+                        nxt.append(o)
+                    else:
+                        ms._remove(o)
+            parts = nxt
+            continue
         for part in parts:
             co, tris = ms._world_tris(part)
             d = (co - np.array(p)) @ np.array(n)
