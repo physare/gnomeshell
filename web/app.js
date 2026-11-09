@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { STLLoader } from "./vendor/STLLoader.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
+import { sliceShell, suggestMore, placeAt as slicePlace } from "./slicer.js";
 import { TransformControls } from "./vendor/TransformControls.js";
 import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, bestPull, rad, deg, outline, polyNormal, pieceSpec, tokens, clipPolytope, polyVerts } from "./tree.js";
 
@@ -184,12 +185,14 @@ function prepTriangles(geo) {
 
 // ------------------------------------------------------------ undo / redo
 const H = { undo: [], redo: [], key: null, t: 0 };
+let sliceApplying = false; // putting a sliced layout in place keeps its alternatives showing
 const snapshot = () => JSON.stringify({ cuts: S.cuts, nextId: S.nextId, joins: S.joins, pulls: S.pulls, active: S.active, insert: S.insert, slice_at: S.sliceAt ?? null });
 // call before changing the layout; a run of changes with the same key (one
 // slider drag) is one step back
 // the overhang right now, so the readout in the view can show what a change did
 const curPct = () => (S.T && latexTri && S.cuts.length ? 100 * S.T.bad / latexTri.total : null);
 function mark(key) {
+  if (!sliceApplying) $("#sliceAlts").hidden = true;
   const now = performance.now();
   if (key && key === H.key && now - H.t < 1200) { H.t = now; return; }
   H.basePct = curPct();
@@ -225,7 +228,7 @@ function scanMarked() {
   H.undo.push(H.scanMark); H.scanMark = null; if (H.undo.length > 200) H.undo.shift();
   H.redo = H.redo.filter((x) => !x.startsWith("SCAN")); H.key = null; undoButtons();
 }
-function resetHistory() { H.undo = []; H.redo = []; H.key = null; H.basePct = null; undoButtons(); }
+function resetHistory() { H.undo = []; H.redo = []; H.key = null; H.basePct = null; undoButtons(); $("#sliceAlts").hidden = true; }
 function undoButtons() { $("#undo").disabled = !H.undo.length; $("#redo").disabled = !H.redo.length; }
 $("#undo").onclick = undo; $("#redo").onclick = redo;
 
@@ -894,32 +897,91 @@ $("#bestCut").onclick = () => withBusy("Finding the best first cut", async () =>
   S.active = c.id; S.selCuts = new Set([c.id]); renderCuts(); refresh();
   if (was === JSON.stringify([c.kind, c.az, c.tilt, +c.pos.toFixed(3)])) toast(`Cut 1 is already the best first cut (${sg.overhang_pct}% overhang on its own).`, true);
 });
+// ------------------------------------------------------------ slice it for me
+// Overhang (as a % of the latex) one more piece has to save to be worth it.
+const SLICE_PENALTY = 0.4, SUGGEST_PENALTY = 0.2;
+function sliceCtx(first) {
+  const num = (v, d) => (Number.isFinite(+v) && v !== "" ? +v : d);
+  return {
+    saved: { cuts: S.cuts, joins: S.joins, pulls: S.pulls },
+    tri: latexTri, verts: latexPos(), opts: opts(), tol: tol(), first,
+    centre: new V3(...S.scan.center),
+    minFrac: clamp(num(S.settings.min_piece_pct, 7), 1, 45) / 100,
+    maxPieces: Math.round(clamp(num(S.settings.auto_max_pieces, 6), 2, 16)),
+    maxTilt: num(S.settings.max_tilt_deg, 30),
+    penalty: SLICE_PENALTY,
+    compute: (cuts, joins) => { S.cuts = cuts; S.joins = joins; S.pulls = {}; return compute(); },
+    nextId: () => S.nextId++,
+    say: async (t) => { $("#busySub").textContent = t; await nextFrame(); },
+  };
+}
+const SLICE_HOW = {
+  worst: "cut 1, then the piece with the most overhang split again and again",
+  "layers across": "layers side to side, each split its own way",
+  "layers front to back": "layers front to back, each split its own way",
+  "layers level": "level layers, each split its own way",
+  "layers along the first cut": "layers along cut 1, each split its own way",
+  "first cut, then each half in layers": "cut 1, then each half in layers",
+};
+const sliceHow = (r) => (r.cuts.length === 1 ? "one cut is all it needs" : SLICE_HOW[r.how] || r.how);
+const slicePct = (v) => (v < 0.005 ? "0%" : v.toFixed(v < 1 ? 2 : 1) + "%");
+function applySlice(r, beforePct) {
+  sliceApplying = true;
+  try { mark(null); } finally { sliceApplying = false; }
+  S.cuts = r.cuts.map((c) => ({ ...c })); S.joins = []; S.pulls = {};
+  S.active = null; S.selCuts.clear(); S.selSegs.clear(); S.selPieces.clear();
+  renderCuts(); refresh();
+  $$("#sliceAlts button").forEach((b) => b.classList.toggle("on", b._r === r));
+  toast(`${r.pieces} pieces: ${sliceHow(r)}. Overhang ${beforePct != null ? slicePct(beforePct) + " → " : ""}${slicePct(100 * S.T.bad / latexTri.total)}, smallest piece ${Math.round(100 * r.minShare)}% of the shell.`, true);
+}
+$("#sliceAuto").onclick = () => withBusy("Slicing the shell", async () => {
+  if (!S.T || !latexTri) throw new Error("Load a scan first.");
+  const beforePct = S.cuts.length ? 100 * S.T.bad / latexTri.total : null;
+  let first = S.cuts[0] ? { ...S.cuts[0], parent: null } : null;
+  if (!first) {
+    const sg = await api("/api/suggest", { max_tilt: S.settings.max_tilt_deg });
+    const { c, point } = cutFromSuggestion(sg);
+    const tmp = sliceCtx(null);
+    if (!slicePlace(tmp, [], c, point)) throw new Error("Couldn't place a first cut. Add one by hand, then try again.");
+    first = c;
+  }
+  const ctx = sliceCtx(first);
+  let res;
+  try { res = await sliceShell(ctx); } finally { S.cuts = ctx.saved.cuts; S.joins = ctx.saved.joins; S.pulls = ctx.saved.pulls; }
+  const ok = res.filter((r) => r.ok);
+  if (!ok.length) { refresh(); throw new Error(`Every layout had a piece smaller than ${Math.round(ctx.minFrac * 100)}% of the shell. Lower Smallest piece in Settings and try again.`); }
+  // the best layout for each number of pieces, to switch between
+  const byCount = new Map();
+  for (const r of ok) if (!byCount.has(r.pieces)) byCount.set(r.pieces, r);
+  const alts = [...byCount.values()].sort((a, b) => a.pieces - b.pieces).slice(0, 6);
+  const box = $("#sliceAlts");
+  box.innerHTML = "<span>Other layouts:</span>";
+  for (const r of alts) {
+    const b = document.createElement("button");
+    b.type = "button"; b._r = r;
+    b.textContent = `${r.pieces} pieces · ${slicePct(r.over)}`;
+    b.title = `${sliceHow(r)[0].toUpperCase() + sliceHow(r).slice(1)}. Smallest piece ${Math.round(100 * r.minShare)}% of the shell.`;
+    b.onclick = () => applySlice(r, null);
+    box.appendChild(b);
+  }
+  box.hidden = alts.length < 2;
+  applySlice(ok[0], beforePct);
+});
 $("#autoCuts").onclick = () => withBusy("Looking for more cuts", async () => {
   if (!S.cuts.length) throw new Error("Add a first cut, or use Find best first cut.");
-  const T = S.T;
-  const keyCells = new Map(T.pieces.map((P) => [P.id, P.cells.map((ci) => T.cells[ci].id)]));
-  const res = await api("/api/autosplit", {
-    pieces: T.pieces.map((P) => ({ id: P.id, cells: pieceSpec(T, P).cells || [pieceSpec(T, P).hs] })),
-    next_id: S.nextId, frame: [T.frame.ex.toArray(), T.frame.ey.toArray()], settings: S.settings,
-  });
-  if (!res.cuts.length) { toast(`No cut that helps enough. Overhang is ${res.before_pct}%.`, true); return; }
+  const ctx = sliceCtx({ ...S.cuts[0], parent: null });
+  ctx.compute = (cuts, joins) => { S.cuts = cuts; S.joins = joins; S.pulls = ctx.saved.pulls; return compute(); };
+  let steps;
+  try { steps = await suggestMore(ctx, { cuts: S.cuts, joins: S.joins }); } finally { S.cuts = ctx.saved.cuts; S.joins = ctx.saved.joins; S.pulls = ctx.saved.pulls; }
+  const now = steps[0], score = (r) => r.over + SUGGEST_PENALTY * r.pieces + (r.locked > now.locked ? 1000 : 0);
+  const best = steps.reduce((a, r) => (score(r) < score(a) ? r : a), now);
+  if (best === now) { refresh(); toast(`No cut that helps enough${now.pieces >= ctx.maxPieces ? ` (already ${now.pieces} pieces, the most Suggest up to allows)` : ""}. Overhang is ${now.over.toFixed(1)}%.`, true); return; }
   mark(null);
-  // a parent the engine names after a joined piece means all of its blocks
-  const mapParent = (par) => {
-    let best = null;
-    for (const k of keyCells.keys()) if ((par === k || par.startsWith(k + ".")) && (!best || k.length > best.length)) best = k;
-    if (!best) return par;
-    const cells = keyCells.get(best), rest = par.slice(best.length);
-    return cells.length === 1 ? cells[0] + rest : cells.map((x) => x + rest);
-  };
-  for (const k of res.cuts) {
-    const c = { id: k.id, parent: k.parent == null ? null : mapParent(k.parent), ...angles(canonical(new V3(...k.normal))), pos: 0.5, auto: true };
-    S.cuts.push(c); S.nextId = Math.max(S.nextId, k.id + 1);
-    placeFromPoint(c, new V3(...k.point));
-  }
+  const added = best.cuts.length - now.cuts.length;
+  S.cuts = best.cuts.map((c) => ({ ...c }));
   S.active = S.cuts[S.cuts.length - 1].id; S.selCuts = new Set([S.active]);
   renderCuts(); refresh();
-  toast(`Added ${res.cuts.length} cut${res.cuts.length > 1 ? "s" : ""}. Overhang about ${res.before_pct}% → ${res.after_pct}%.`, true);
+  toast(`Added ${added} cut${added > 1 ? "s" : ""}. Overhang ${now.over.toFixed(1)}% → ${best.over.toFixed(1)}%.`, true);
 });
 ["tOver", "tPlanes", "tPieces"].forEach((id) => $("#" + id).onchange = () => refresh());
 $("#tPour").onchange = () => { groups.pour.visible = $("#tPour").checked; };
@@ -1257,7 +1319,10 @@ const modeKind = () => (S.mode === "lines" ? "seg" : "piece");
 function setMode(m) {
   S.mode = m;
   $$("#rail [data-mode]").forEach((b) => { b.classList.toggle("on", b.dataset.mode === m); b.setAttribute("aria-pressed", String(b.dataset.mode === m)); });
-  $("#hint").textContent = m === "lines" ?
+  canvas.style.cursor = m === "draw" ? "crosshair" : "";
+  $("#hint").textContent = m === "draw" ?
+    "Draw a cut: drag a line across the model · the cut goes through the line straight away from you, through the pieces it crosses · P goes back to picking" :
+    m === "lines" ?
     "Lines: click a line between pieces · Shift-click for more · Delete removes it · double-click picks the whole cut · right-click for options" :
     "Pieces: click the model to pick a piece · Shift-click for more · right-click for options · drag an arrow tip to change how it pulls off";
   S.hover = null; highlight();
@@ -1274,6 +1339,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (S.step !== "cut" || gizmoHot()) return;
   if (e.button === 2) { down = { x: e.clientX, y: e.clientY, button: 2 }; return; }
   if (e.button !== 0) return;
+  if (S.mode === "draw" && !insViewOn()) { cutLineStart(e); e.stopImmediatePropagation(); return; }
   setRay(e);
   if ($("#tPieces").checked && !insViewOn()) {
     const hit = ray.intersectObjects(groups.arrows.children.filter((o) => o.userData.tip), false)[0];
@@ -1286,6 +1352,7 @@ canvas.addEventListener("pointerdown", (e) => {
   down = { x: e.clientX, y: e.clientY, button: 0 };
 }, true);
 canvas.addEventListener("pointermove", (e) => {
+  if (cutLine) { cutLineMove(e); return; }
   if (sizeDrag) { sizerMove(e); return; }
   if (insDrag) { insDragMove(e); return; }
   if (sliceDrag) { sliceDragMove(e); return; }
@@ -1303,6 +1370,7 @@ canvas.addEventListener("pointermove", (e) => {
   if (e.buttons || S.step !== "cut" || hoverT) return;
   hoverT = requestAnimationFrame(() => {
     hoverT = null;
+    if (S.mode === "draw") return;
     if (insHandleAt(e) || sizerAt(e) || sliceHandleAt(e)) { canvas.style.cursor = "grab"; return; }
     const h = gizmoHot() ? null : pickAt(e, modeKind());
     if ((h && h.key) !== (S.hover && S.hover.key)) { S.hover = h; highlight(); canvas.style.cursor = h ? "pointer" : ""; }
@@ -1310,6 +1378,7 @@ canvas.addEventListener("pointermove", (e) => {
 });
 canvas.addEventListener("pointerleave", () => { if (S.hover) { S.hover = null; highlight(); canvas.style.cursor = ""; } });
 canvas.addEventListener("pointerup", (e) => {
+  if (cutLine) { cutLineEnd(e); return; }
   if (sizeDrag) { sizerEnd(e); return; }
   if (insDrag) { insDragEnd(e); return; }
   if (sliceDrag) { sliceDragEnd(e); return; }
@@ -1335,6 +1404,82 @@ canvas.addEventListener("dblclick", (e) => {
   S.active = s.cut; S.selCuts = new Set([s.cut]); renderCuts(); refresh();
 });
 $$("#rail [data-mode]").forEach((b) => b.onclick = () => setMode(b.dataset.mode));
+// ---- draw a cut: drag a line across the view. The cut is the plane through
+// that line straight along the view, so you see it edge-on where you drew it,
+// and it goes only through the pieces the line crosses (at any depth).
+let cutLine = null;
+function screenXY(e) { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+function lineOverlay(a, b) {
+  let svg = $("#drawLayer");
+  if (!svg) { svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.id = "drawLayer"; canvas.parentElement.appendChild(svg); }
+  svg.innerHTML = a ? `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}"/><circle cx="${a[0]}" cy="${a[1]}" r="4"/><circle cx="${b[0]}" cy="${b[1]}" r="4"/>` : "";
+}
+function cutLineStart(e) {
+  cutLine = { a: screenXY(e), b: screenXY(e) };
+  orbit.enabled = false; canvas.setPointerCapture(e.pointerId);
+  lineOverlay(cutLine.a, cutLine.b);
+}
+function cutLineMove(e) {
+  cutLine.b = screenXY(e);
+  if (e.shiftKey) { // Shift: level, upright or 45 degrees on screen
+    const dx = cutLine.b[0] - cutLine.a[0], dy = cutLine.b[1] - cutLine.a[1], L = Math.hypot(dx, dy), q = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * Math.PI / 4;
+    cutLine.b = [cutLine.a[0] + L * Math.cos(q), cutLine.a[1] + L * Math.sin(q)];
+  }
+  lineOverlay(cutLine.a, cutLine.b);
+}
+function rayAt(xy) {
+  const r = canvas.getBoundingClientRect();
+  ray.setFromCamera(new THREE.Vector2(xy[0] / r.width * 2 - 1, -(xy[1] / r.height) * 2 + 1), camera);
+  return { o: ray.ray.origin.clone(), d: ray.ray.direction.clone() };
+}
+// the cut a line drawn from screen point a to b makes: {n, point, parent, under} or a reason it can't
+function cutFromLine(a, b) {
+  if (!S.T) return { why: "Load a scan first." };
+  const A = rayAt(a), B = rayAt(b), mid = new V3(...S.scan.center), view = camera.getWorldDirection(new V3());
+  const pl = new THREE.Plane().setFromNormalAndCoplanarPoint(view, mid), pa = new V3(), pb = new V3();
+  if (!new THREE.Ray(A.o, A.d).intersectPlane(pl, pa) || !new THREE.Ray(B.o, B.d).intersectPlane(pl, pb)) return { why: "Turn the view to face the model, then draw the line again." };
+  // the plane through the line, straight along the view: level with the view
+  // when you look from the side (so a flat line makes a level cut), straight
+  // down when you look from above, and one within 3° of level or square to the
+  // box snaps to it
+  const ext = view.clone();
+  if (Math.abs(view.z) < 0.5) ext.z = 0; else if (Math.abs(view.z) > 0.87) ext.set(0, 0, Math.sign(view.z));
+  ext.normalize();
+  const n = pb.clone().sub(pa).cross(ext).normalize();
+  if (!(n.length() > 0.5)) return { why: "Draw a longer line." };
+  for (const ax of [new V3(0, 0, 1), S.T.frame.ex, S.T.frame.ey]) if (Math.abs(n.dot(ax)) > Math.cos(3 * Math.PI / 180)) { n.copy(ax).multiplyScalar(Math.sign(n.dot(ax))); break; }
+  const point = pa.clone().add(pb).multiplyScalar(0.5), d = n.dot(point);
+  // which blocks the plane goes through, and which of those lie under the line
+  const r = canvas.getBoundingClientRect();
+  const proj = (v) => { const q = v.clone().project(camera); return [(q.x + 1) / 2 * r.width, (1 - q.y) / 2 * r.height]; };
+  const ux = b[0] - a[0], uy = b[1] - a[1], uu = ux * ux + uy * uy;
+  const crossing = [], under = [];
+  for (const L of S.T.cells) {
+    const cap = clipPolytope(L.poly, n, d, null).cap;
+    if (!cap) continue;
+    crossing.push(L.id);
+    let lo = Infinity, hi = -Infinity;
+    for (const v of cap) { const [x, y] = proj(v), t = ((x - a[0]) * ux + (y - a[1]) * uy) / uu; lo = Math.min(lo, t); hi = Math.max(hi, t); }
+    if (hi > 0.02 && lo < 0.98) under.push(L.id);
+  }
+  if (!under.length) return { why: "That line doesn't cross the shell. Draw it across the model." };
+  const parent = under.length === crossing.length ? null : under.length === 1 ? under[0] : under;
+  return { n, point, parent, under };
+}
+function cutLineEnd(e) {
+  const { a, b } = cutLine; cutLine = null;
+  orbit.enabled = true; canvas.releasePointerCapture?.(e.pointerId); lineOverlay(null);
+  if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 12) return;
+  const f = cutFromLine(a, b);
+  if (f.why) return toast(f.why);
+  mark(null);
+  const c = { id: S.nextId++, parent: f.parent, ...angles(canonical(f.n)), pos: 0.5, auto: false };
+  S.cuts.push(c); placeFromPoint(c, f.point);
+  S.active = c.id; S.selCuts = new Set([c.id]); S.selSegs.clear(); S.selPieces.clear();
+  renderCuts(); refresh();
+  const k = cutIndex(c.id) + 1;
+  toast(`Cut ${k} goes through ${f.parent == null ? "the whole shell" : f.under.length === 1 ? "one piece" : `${f.under.length} pieces`}. Drag its arrow to slide it or a ring to turn it, draw another, or press P to pick pieces.`, true);
+}
 
 // ------------------------------------------------------------ right-click menus
 function openMenu(x, y, items) {
@@ -1416,7 +1561,7 @@ function pieceMenu(x, y, id) {
 const KEYS = [
   ["Ctrl+Z", "Undo"], ["Ctrl+Y or Ctrl+Shift+Z", "Redo"],
   ["Delete", "Remove the picked lines or cuts, or join the picked pieces"], ["Esc", "Clear the picks, close a menu, stop optimizing"],
-  ["P / L", "Pick pieces / pick lines in the view"], ["Shift+click", "Pick more than one"], ["Ctrl+A", "Pick every piece"],
+  ["P / L", "Pick pieces / pick lines in the view"], ["D", "Draw a cut: drag a line across the model (Shift keeps it level, upright or at 45°)"], ["Shift+click", "Pick more than one"], ["Ctrl+A", "Pick every piece"],
   ["C", "Add a cut through the whole shell"], ["S", "Scale box: drag a gold corner to size the scan"], ["R / Shift+R", "Turn the scan 90° / 15° around Z"],
   ["Drag the arrow", "Slide the open cut"], ["Drag a ring", "Turn or tilt the open cut"], ["Shift while dragging", "Snap to 5° or 5%"],
   ["← →", "On a slider: 1° or 1% (Shift: 5)"], ["O", "Optimize the open cut"], ["M", "Join the picked pieces"],
@@ -1467,7 +1612,7 @@ addEventListener("keydown", (e) => {
   const tabKey = { Digit1: "scan", Digit2: "cuts", Digit3: "insert", Digit4: "settings" }[e.code];
   if (tabKey) { e.preventDefault(); showTab(tabKey); return; }
   const act = {
-    p: () => setMode("pieces"), l: () => setMode("lines"),
+    p: () => setMode("pieces"), l: () => setMode("lines"), d: () => setMode("draw"),
     o: () => S.active != null && optimize(S.active, ["az", "tilt", "pos"]),
     m: () => mergePieces([...S.selPieces]), f: () => viewFrom("fit"),
     c: () => { showTab("cuts"); $("#addCut").click(); },
@@ -3860,7 +4005,7 @@ $("#insOnly").onclick = () => {
 };
 
 // for testing
-window.__ms = { showTab, splitPartOf, SPLIT, splitApart: () => splitApart, setDrawMode, SEAM, drawSlicePlan, sliceDragStart, curTab, sizerAt, drawSizer, sizerOn, baseH, setBaseH, latexDistance, INS, S, insCentre: (T) => insCentreOnOpening(T), insFit, insAutoFit, insHandleAt, setInsView, insViewOn, insThinnest, insLayout, drawInsert, insSpec, loadRecent, frameGroup, slicePlans, startBuild, pickAt, pieceSpec, refresh, compute, splitPieces, splitNormal, pickAllPieces, mirrorCuts, mirrorPlane, applyLayout, layoutNow, labels: () => labels, renderCuts, camera, groups, removeCut, deleteSegs, deleteCuts, mergePieces, optimize, undo, redo, setMode, selectSeg, selectPiece, selectCut, H, meshes, handle, gizmoT, gizmoR, onHandleMove };
+window.__ms = { sliceShell, suggestMore, sliceCtx, showTab, splitPartOf, SPLIT, splitApart: () => splitApart, setDrawMode, tri: () => latexTri, bins: () => latexBins, verts: () => latexPos(), opts, renderCuts, SEAM, drawSlicePlan, sliceDragStart, curTab, sizerAt, drawSizer, sizerOn, baseH, setBaseH, latexDistance, INS, S, insCentre: (T) => insCentreOnOpening(T), insFit, insAutoFit, insHandleAt, setInsView, insViewOn, insThinnest, insLayout, drawInsert, insSpec, loadRecent, frameGroup, slicePlans, startBuild, pickAt, pieceSpec, refresh, compute, splitPieces, splitNormal, pickAllPieces, mirrorCuts, mirrorPlane, applyLayout, layoutNow, labels: () => labels, renderCuts, camera, groups, removeCut, deleteSegs, deleteCuts, mergePieces, optimize, undo, redo, setMode, selectSeg, selectPiece, selectCut, H, meshes, handle, gizmoT, gizmoR, onHandleMove };
 
 // ------------------------------------------------------------ tooltips and panels
 // Hover anything with a title (or a ? icon) for a tooltip; long help lives there, not in the panel.

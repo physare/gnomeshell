@@ -88,6 +88,7 @@
       <nav class="rail" id="rail" aria-label="Tools" hidden>
         <button type="button" data-mode="pieces" class="on" aria-label="Pick pieces" data-tname="Pick pieces" data-tkey="P" data-tip="Click pieces in the view. Shift-click picks more than one, Ctrl+A picks them all."><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l14 7-6 2-2 6z"/></svg></button>
         <button type="button" data-mode="lines" aria-label="Pick lines" data-tname="Pick lines" data-tkey="L" data-tip="Click the lines between pieces. Delete removes them, double-click picks the whole cut."><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 20L20 4M4 9V4h5M15 20h5v-5"/></svg></button>
+        <button type="button" data-mode="draw" aria-label="Draw a cut" data-tname="Draw a cut" data-tkey="D" data-tip="Drag a line across the model. The cut goes through the line straight away from you, only through the pieces it crosses. Then drag its arrow or rings to fine-tune it."><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21L21 3" stroke-dasharray="3 3"/><path d="M14 4l6 6-9 9H5v-6z"/></svg></button>
         <span class="rsep" aria-hidden="true"></span>
         <button type="button" id="railCut" aria-label="Add a cut" data-tname="Add a cut" data-tkey="C" data-tip="Adds a cut through the whole shell. Drag the arrow to slide it, a ring to turn or tilt it."><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12"/></svg></button>
         <button type="button" id="railOpt" aria-label="Optimize the open cut" data-tname="Optimize cut" data-tkey="O" data-tip="Turns and slides the open cut until the fewest faces would catch. Esc stops it."><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg></button>
@@ -351,6 +352,8 @@
             <h2>Cuts</h2>
             <button type="button" class="btn" id="bestCut">Find best first cut</button>
           </div>
+          <button data-in="cuts" type="button" class="btn slice-go" id="sliceAuto" title="Try many layouts (splitting the piece with the most overhang again and again, and thin layers each split its own way) and keep the one with the least overhang for the fewest pieces. No piece is smaller than the Smallest piece setting. Your cuts are replaced; Ctrl+Z brings them back.">Slice it for me</button>
+          <div data-in="cuts" class="slice-alts" id="sliceAlts" hidden></div>
           <div data-in="cuts" id="cuts"></div>
           <button data-in="cuts" type="button" class="btn dashed" id="addCut">+ Cut through the whole shell</button>
           <div data-in="cuts" class="meter slim" id="meter">
@@ -505,7 +508,8 @@
                 <label class="check" for="split_big_pieces" title="A shell piece too big for your printer is cut into parts that fit, with pegs and holes to join them"><input id="split_big_pieces" data-set type="checkbox"> Split shell pieces that don't fit the printer</label>
                 <label for="max_tilt_deg" title="How far from upright Find best first cut and Suggest more cuts may tilt a cut">Steepest suggested cut (°)<input id="max_tilt_deg" data-set type="number" step="5" min="0" max="60"></label>
                 <label for="draft_deg" title="A face that leans back against the pull by less than this still counts as clean, because the latex flexes past it. Higher shows less red.">Let faces lean back up to (°)<input id="draft_deg" data-set type="number" step="0.5" min="0" max="15"></label>
-                <label for="auto_max_pieces">Suggest up to (pieces)<input id="auto_max_pieces" data-set type="number" step="1" min="2" max="16"></label>
+                <label for="auto_max_pieces" title="The most pieces Slice it for me and Suggest more cuts will make">Suggest up to (pieces)<input id="auto_max_pieces" data-set type="number" step="1" min="2" max="16"></label>
+                <label for="min_piece_pct" title="Slice it for me and Suggest more cuts won't make a piece smaller than this share of the whole shell">Smallest piece (% of the shell)<input id="min_piece_pct" data-set type="number" step="1" min="1" max="45"></label>
               </div>
               <button type="button" class="btn sm resetDefaults">Reset all settings to the defaults</button>
             </div>

@@ -206,6 +206,26 @@ USE
          beside each slider finds the setting with the least overhang;
          "Optimize all three" tries them together. "Cut through the whole
          shell" adds a cut that splits every piece it crosses.
+       - Draw a cut: pick the pencil in the tool rail (or press D) and drag
+         a line across the model. The cut goes through that line straight
+         away from you, so turn the view until you see the seam edge-on
+         first (Front, Side or Top). It only goes through the pieces the
+         line crosses; a line across the whole shell cuts everything.
+         Hold Shift to keep the line level, upright or at 45 degrees. Then
+         slide or turn it with its handle like any other cut. P goes back
+         to picking.
+       - Slice it for me: lays out every cut in one go. It tries cut 1 with
+         the piece that has the most red split again and again, and thin
+         layers (side to side, front to back, level, and each half of
+         cut 1 in layers), each layer kept whole or split its own way, then
+         keeps the one with the least overhang for the fewest pieces. One
+         more piece has to save about 0.4% of overhang to be worth it. No
+         piece is smaller than Smallest piece (7% of the shell unless you
+         change it under Settings, Printer & cutting), and there are never
+         more than Suggest up to. "Other layouts" below the button lists
+         the best layout for each number of pieces, so you can pick fewer
+         or more pieces in one click. Your old cuts are replaced; Ctrl+Z
+         brings them back.
        - Lines: pick Lines in the tool rail, click a line between two
          pieces (Shift-click for more) and press Delete. Only that part of
          the cut goes, and the two pieces beside it become one. That is how
@@ -233,9 +253,10 @@ USE
        - Saved layouts (at the bottom of the Cuts tab): name the cuts you have and Save. Load one from the
          list any time (Ctrl+Z goes back). The layout you're working on is
          also kept as you go and comes back when you open the scan again.
-       - Suggest more cuts keeps splitting whichever piece has the most red,
-         up to the number of pieces set under Printer & cutting. What it
-         adds are normal cuts you can move or delete.
+       - Suggest more cuts keeps your cuts and keeps splitting whichever
+         piece has the most red, while a cut saves enough overhang, up to
+         the number of pieces set under Printer & cutting and never below
+         Smallest piece. What it adds are normal cuts you can move or delete.
        - Pour collar: carries the base opening down so you have room to pour.
        - Test slice: one for the whole mold, since once one piece fits they
          all do. Pink in the view shows where it's cut, with a line where it
