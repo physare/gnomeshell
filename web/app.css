@@ -581,3 +581,23 @@ body.no-panel .panel { display: none; }
 .draw-row .seg3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
 #drawLayer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
 #drawLayer polygon { fill: rgba(240, 160, 64, 0.12); stroke: #f0a040; stroke-width: 1.5; stroke-dasharray: 5 4; }
+
+/* phone scans (the GnomeShell Scan app) */
+.phone { display: flex; flex-direction: column; gap: 10px; }
+.phone-code { display: flex; align-items: center; gap: 10px; }
+.phone-code .mono { font-size: 20px; letter-spacing: 0.12em; color: var(--latex); }
+.phone-code .btn { margin-left: auto; }
+.phone-addr { margin: 0; font-size: 12px; line-height: 1.45; }
+.phone-acts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.phone-acts a.btn { text-decoration: none; display: inline-block; }
+.phone-detail { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); margin-left: auto; }
+.phone-detail select { background: var(--field, #2a2e32); color: var(--text); border: 1px solid var(--field-line, #393e43); border-radius: 6px; padding: 4px 6px; }
+.pscan { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); }
+.pscan .ps-top { display: flex; align-items: baseline; gap: 8px; }
+.pscan .ps-when { margin-left: auto; font-size: 12px; color: var(--faint); white-space: nowrap; }
+.pscan .ps-msg { font-size: 12px; color: var(--muted); }
+.pscan .ps-msg.ok { color: var(--ok); }
+.pscan .ps-msg.bad { color: var(--bad); }
+.pscan .ps-bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.pscan .ps-bar i { display: block; height: 100%; background: var(--latex); transition: width .4s; }
+.pscan .ps-acts { display: flex; gap: 6px; flex-wrap: wrap; }

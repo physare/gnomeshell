@@ -153,6 +153,16 @@
         <div class="scroll">
           <h2>Recent scans</h2>
           <div class="recent" id="recent"><p class="muted">Nothing yet. Shells you build show up here.</p></div>
+          <div class="head-row h2help"><h2>Phone scans</h2><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="Take photos with the GnomeShell Scan app on your phone. They come here over Wi-Fi while GnomeShell is open, and the 3D model is built on this PC.">?</span></div>
+          <div class="phone" id="phone">
+            <div class="phone-code"><span class="muted">Code for the app</span><span class="mono strong" id="phoneCode">······</span><button type="button" class="btn sm" id="phoneNewCode" title="Make a new code. Phones with the old one can't send any more.">New code</button></div>
+            <p class="muted phone-addr" id="phoneAddr"></p>
+            <div class="phone-acts">
+              <a class="btn sm" id="phoneSheet" href="/api/phone/sheet.pdf" target="_blank" rel="noopener">Print the scan sheet</a>
+              <label class="phone-detail" for="phoneDetail">Detail <select id="phoneDetail"></select></label>
+            </div>
+            <div class="recent" id="phoneScans"><p class="muted">No phone scans yet.</p></div>
+          </div>
           <div class="head-row h2help"><h2>Your defaults</h2><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="Anything you change on the next screen is saved here and used for every scan.">?</span></div>
           <dl class="kv" id="defaults"></dl>
           <button type="button" class="btn sm resetDefaults">Reset to the defaults</button>

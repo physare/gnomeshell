@@ -34,6 +34,49 @@ UNITS
   Settings > Show sizes in: mm, cm or inches. Every size you see or type
   is in that unit; the files are always in mm.
 
+PHONE SCANS (the GnomeShell Scan app)
+  Turn an object into a scan with your Android phone's camera. The phone
+  takes the photos; this PC builds the 3D model from them and opens it here
+  like any other scan, at its real size and standing upright.
+
+  Once:
+  1. Install GnomeShell Scan on the phone (GnomeShellScan.apk; see
+     android\README.md in this folder).
+  2. Print the scan sheet: Load scan screen > Phone scans > Print the scan
+     sheet. Print at Actual size (100%), not Fit to page. The bar along the
+     bottom should measure exactly 100 mm.
+  3. Open GnomeShell, then open the app. It finds the PC by itself when both
+     are on the same Wi-Fi. Type in the 6-digit code that the Phone scans
+     panel shows. The first time, Windows may ask whether Blender can use the
+     network: choose Allow (Private networks).
+
+  Each scan:
+  1. Lay the sheet flat in good, even light (daylight from a window, no harsh
+     shadows). Stand the object on the grey ring, arrow pointing away.
+     Something too big for the sheet can stand next to it instead, as long as
+     the sheet shows in most photos.
+  2. In the app press New scan and walk slowly round the object. The dial
+     shows three rings: low (looking across at it), middle and high (looking
+     down). With Auto on, a photo is taken each time you hold still over a
+     slice that has none yet. Fill all three rings: about 50 photos. Blurry
+     photos are thrown away and you're asked to take that one again.
+  3. Press Done, then Send to GnomeShell. The photos go to the PC and the
+     model starts building on its own (Phone scans shows how far along it is;
+     the app does too). Keep GnomeShell open until it's done.
+  4. Press Open in GnomeShell, then carry on as with any scan.
+
+  Building takes a while on the processor: roughly 10 to 30 minutes for 50
+  photos, more on Fine detail. The first scan also downloads the two free
+  programs that do the work (COLMAP and OpenMVS, about 150 MB, kept in
+  %LOCALAPPDATA%\GnomeShell\photoscan-tools).
+
+  Tips: shiny, see-through or plain single-colour objects scan badly (dull
+  them with a light dusting of talc or dry shampoo). Don't move the object
+  or the sheet during a scan. Fill the picture with the object and sheet.
+
+  Each phone scan is kept in Documents\Mold Shells\Phone scans, with its
+  photos, the finished model.stl and a log.txt that says what happened.
+
 UPDATES
   When GnomeShell opens it checks github.com/physare/gnomeshell for a newer
   version. If there is one, a card at the bottom says what's new: Update
