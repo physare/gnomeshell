@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 blender_path.txt
+android/build/
+android/*.keystore

@@ -37,13 +37,15 @@ import insert as ins  # noqa: E402
 import split as sp  # noqa: E402
 import web as gapweb  # noqa: E402
 import seam  # noqa: E402
+import photoscan  # noqa: E402
+import marker_sheet  # noqa: E402
 
 HOME_DOCS = os.path.join(os.path.expanduser("~"), "Documents")
 OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expanduser("~"), "Mold Shells")
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.14.7"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.15.0"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -229,6 +231,7 @@ def recent():
 # These run on Blender's main thread only (see main loop at the bottom).
 
 MODEL_TYPES = (".stl", ".obj", ".ply", ".blend")
+PHONE = None  # photoscan.PhoneLink: photos from the GnomeShell Scan phone app (started in main)
 
 
 def _as_stl(data, filename):
@@ -1581,6 +1584,17 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/info":
             return self._send(200, {"out_root": OUT_ROOT, "blender": bpy.app.version_string,
                                     "version": APP_VERSION, "boot": BOOT})
+        if p == "/api/phone":
+            if PHONE is None:
+                return self._send(200, {"error": "Phone scans aren't running."})
+            return self._send(200, {**PHONE.info(), "scans": PHONE.scans.list(), "busy": PHONE.scans.busy()})
+        if p == "/api/phone/sheet.pdf":
+            return self._send(200, marker_sheet.pdf_bytes(), "application/pdf")
+        if p.startswith("/api/phone/model/") and PHONE is not None:
+            try:
+                return self._file(os.path.join(PHONE.scans.folder(p.rsplit("/", 1)[1]), "model.stl"))
+            except ValueError:
+                return self._send(404, {"error": "not found"})
         if p.startswith("/api/scan/"):
             return self._file(os.path.join(OUT_ROOT, safe_name(p.rsplit("/", 1)[1]), "scan.stl"))
         rel = "index.html" if p in ("/", "") else p.lstrip("/")
@@ -1676,6 +1690,8 @@ class Handler(BaseHTTPRequestHandler):
                 s.update({k: data[k] for k in DEFAULT_SETTINGS if k in data})
                 save_settings(check_settings(s))
                 return self._send(200, s)
+            if p.startswith("/api/phone/"):
+                return self._send(200, self._phone(p, data))
             if p == "/api/open":
                 folder = STATE["folder"] or OUT_ROOT
                 target = os.path.join(folder, "shell.3mf") if data.get("what") == "bambu" else \
@@ -1690,6 +1706,36 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             return self._send(500, {"error": str(e)})
         return self._send(404, {"error": "old_engine"})
+
+    def _phone(self, p, data):
+        """The Phone scans panel's buttons."""
+        if PHONE is None:
+            raise RuntimeError("Phone scans aren't running. Start GnomeShell again.")
+        sc = PHONE.scans
+        if p == "/api/phone/settings":
+            return sc.set(**{k: data[k] for k in ("detail", "new_code", "auto_build") if k in data})
+        sid = str(data.get("id") or "")
+        folder = sc.folder(sid)
+        if p == "/api/phone/build":
+            if len([f for f in os.listdir(os.path.join(folder, "photos")) if f.lower().endswith((".jpg", ".jpeg"))]) < 12:
+                raise RuntimeError("This scan has fewer than 12 photos, too few to build from.")
+            sc.build(sid)
+            return {"ok": True}
+        if p == "/api/phone/stop":
+            sc.stop(sid)
+            return {"ok": True}
+        if p == "/api/phone/folder":
+            if hasattr(os, "startfile"):
+                os.startfile(folder)
+            return {"opened": folder}
+        if p == "/api/phone/open":
+            stl = os.path.join(folder, "model.stl")
+            if not os.path.isfile(stl):
+                raise RuntimeError("This scan hasn't been built yet.")
+            with open(stl, "rb") as f:
+                b = f.read()
+            return self._busy(job_load, b, sid + ".stl")
+        raise ValueError("Unknown phone scan request.")
 
     def _busy(self, fn, *args):
         if not BUSY_LOCK.acquire(blocking=False):
@@ -1780,6 +1826,11 @@ def main():
         print("  No free port for GnomeShell. Close other GnomeShell windows, or end blender.exe in Task Manager.", flush=True)
         os._exit(1)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    global PHONE
+    try:
+        PHONE = photoscan.PhoneLink(photoscan.Scans(OUT_ROOT), APP_VERSION)
+    except Exception:
+        traceback.print_exc()
     url = f"http://127.0.0.1:{port}/"
     print(f"\n  GnomeShell is running at {url}\n  Files are saved in {OUT_ROOT}\n", flush=True)
     window = open_window(url)
@@ -1794,9 +1845,12 @@ def main():
         said_bye = STATE["bye_at"] and since(STATE["bye_at"]) > 15        # page closed and no window checked in since
         gone_quiet = STATE["last_ping"] and since(STATE["last_ping"]) > 180  # no window has checked in for 3 min
         never_came = not STATE["last_ping"] and now - started > 300         # the window never opened
-        if (closed or said_bye or gone_quiet or never_came or STATE["quit"]) and not STATE["busy"]:
+        building = PHONE is not None and PHONE.scans.busy() and not STATE["quit"]  # a phone scan finishes first
+        if (closed or said_bye or gone_quiet or never_came or STATE["quit"]) and not STATE["busy"] and not building:
             print("  Window closed, quitting." if not STATE["quit"] else "  A newer GnomeShell took over, quitting.", flush=True)
             shutil.rmtree(PREVIEW_DIR, ignore_errors=True)
+            if PHONE is not None:
+                PHONE.close()
             os._exit(0)  # closing the app window quits the engine too
         try:
             fn, args, box = JOBS.get(timeout=0.5)

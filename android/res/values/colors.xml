@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ground">#16181a</color>
+    <color name="bar">#1b1d20</color>
+    <color name="panel">#1e2124</color>
+    <color name="card">#24282b</color>
+    <color name="line">#2d3236</color>
+    <color name="text">#e8e6e1</color>
+    <color name="muted">#a3aaaf</color>
+    <color name="gold">#e3a33c</color>
+    <color name="gold_ink">#1a1408</color>
+    <color name="teal">#5fa497</color>
+    <color name="bad">#e5674a</color>
+</resources>

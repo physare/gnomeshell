@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.14.7"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.15.0"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -2927,6 +2927,67 @@ async function loadRecent() {
   });
 }
 
+// ------------------------------------------------------------ phone scans
+// Photos from the GnomeShell Scan phone app come in over Wi-Fi; the engine
+// builds the 3D model from them (photoscan.py). This panel shows the code the
+// app needs, the scans as they build, and opens a finished one like any scan.
+let phoneSig = "";
+async function loadPhone() {
+  const r = await api("/api/phone").catch(() => null);
+  if (!r) return;
+  if (r.error && !r.code) { $("#phoneAddr").textContent = r.error; return; }
+  $("#phoneCode").textContent = r.code.replace(/(\d{3})(\d{3})/, "$1 $2");
+  $("#phoneAddr").textContent = r.error ? r.error : `The app finds this PC by itself on the same Wi-Fi. If it can't, type ${(r.addresses || []).map((a) => a + ":" + r.port).join(" or ") || "this PC's address"} into the app. If Windows asks whether Blender may use the network, choose Allow.`;
+  const sel = $("#phoneDetail");
+  if (!sel.options.length) Object.entries(r.details).forEach(([k, v]) => sel.add(new Option(v, k)));
+  if (document.activeElement !== sel) sel.value = r.detail;
+  const sig = JSON.stringify(r.scans);
+  if (sig === phoneSig) return;
+  phoneSig = sig;
+  const box = $("#phoneScans");
+  if (!r.scans.length) { box.innerHTML = '<p class="muted">No phone scans yet.</p>'; return; }
+  box.innerHTML = "";
+  r.scans.forEach((s) => {
+    const d = document.createElement("div"); d.className = "pscan";
+    d.innerHTML = '<div class="ps-top"><span class="strong"></span><span class="ps-when mono"></span></div><div class="ps-msg"></div><div class="ps-acts"></div>';
+    d.querySelector(".strong").textContent = s.name || s.id;
+    d.querySelector(".ps-when").textContent = `${s.photos || 0} photos · ${(s.created || "").slice(5, 16)}`;
+    const msg = d.querySelector(".ps-msg");
+    const st = s.state;
+    msg.textContent = st === "receiving" ? "Photos coming in from the phone…"
+      : st === "received" ? "All photos here. Press Build to make the 3D model."
+      : st === "queued" ? "Waiting its turn…"
+      : st === "building" ? `${s.message || "Building"} · ${s.percent || 0}%`
+      : st === "done" ? (s.message || "Ready") + (s.seconds ? ` · took ${Math.max(1, Math.round(s.seconds / 60))} min` : "")
+      : st === "failed" ? "Didn't build: " + (s.error || s.message || "")
+      : st === "stopped" ? "Stopped." : (s.message || "");
+    msg.classList.toggle("ok", st === "done"); msg.classList.toggle("bad", st === "failed");
+    if (st === "building" || st === "queued") {
+      const b = document.createElement("div"); b.className = "ps-bar"; b.innerHTML = "<i></i>";
+      b.firstChild.style.width = (s.percent || 0) + "%"; d.insertBefore(b, d.querySelector(".ps-acts"));
+    }
+    const acts = d.querySelector(".ps-acts");
+    const add = (label, primary, fn) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn sm" + (primary ? " primary" : ""); b.textContent = label; b.onclick = fn; acts.appendChild(b); };
+    if (s.has_model) add("Open in GnomeShell", true, () => openPhoneScan(s.id));
+    if (st === "building" || st === "queued") add("Stop", false, () => api("/api/phone/stop", { id: s.id }).then(loadPhone).catch((e) => toast(e.message)));
+    else if (st !== "receiving") add(s.has_model ? "Build again" : "Build 3D model", !s.has_model, () => api("/api/phone/build", { id: s.id }).then(() => { toast("Building the 3D model. It takes a while: you can keep using GnomeShell.", true); loadPhone(); }).catch((e) => toast(e.message)));
+    add("Folder", false, () => api("/api/phone/folder", { id: s.id }).catch((e) => toast(e.message)));
+    box.appendChild(d);
+  });
+}
+async function openPhoneScan(id) {
+  await withBusy("Loading scan", async () => {
+    const info = await api("/api/phone/open", { id });
+    unitScale = 1; $$("[data-scale]").forEach((x) => x.classList.toggle("on", x.dataset.scale === "1"));
+    S.build = null; groups.pieces.clear(); groups.slices.clear();
+    go("cut"); await showScan(info, false, true); viewFrom("fit");
+    if (info.grown) grownNote(info);
+  });
+}
+$("#phoneNewCode").onclick = () => api("/api/phone/settings", { new_code: true }).then(() => { phoneSig = ""; loadPhone(); toast("New code made. Type it into the phone app.", true); }).catch((e) => toast(e.message));
+$("#phoneDetail").onchange = (e) => api("/api/phone/settings", { detail: e.target.value }).catch((e2) => toast(e2.message));
+setInterval(() => { if (S.step === "load" && !document.hidden) loadPhone(); }, 3000);
+
 // ------------------------------------------------------------ build
 function startBuild(slicesOnly) {
   if (!S.cuts.length || !S.T) { toast("Add at least one cut first."); return; }
@@ -3215,7 +3276,7 @@ addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", ""));
   } catch (e) {
     $("#fileMeta").textContent = "Engine not running"; toast("Can't reach the engine. Start GnomeShell from its shortcut.");
   }
-  fillSettings(); loadRecent();
+  fillSettings(); loadRecent(); loadPhone();
 })();
 
 // ------------------------------------------------------------ silicone insert
