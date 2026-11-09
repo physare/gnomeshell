@@ -43,7 +43,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.14.6"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.14.7"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -75,6 +75,7 @@ DEFAULT_SETTINGS = {
     "max_tilt_deg": ms.DEFAULTS["max_tilt_deg"],
     "draft_deg": 2.0,
     "auto_max_pieces": 6,
+    "min_piece_pct": 7.0,
     "shell_style": "BOX",
     "contour_mm": ms.DEFAULTS["contour_mm"],
     "strip_w_mm": ms.DEFAULTS["strip_w_mm"],
@@ -112,6 +113,7 @@ LIMITS = {
     "max_tilt_deg": ("Auto-cut max tilt", 0, 60, False),
     "draft_deg": ("Overhang tolerance", 0, 15, False),
     "auto_max_pieces": ("Suggest up to", 2, 16, True),
+    "min_piece_pct": ("Smallest piece", 1, 45, False),
     "contour_mm": ("Contour thickness", 1.5, 20, False),
     "strip_w_mm": ("Strip width", 4, 40, False),
     "strip_t_mm": ("Strip thickness", 2, 15, False),

@@ -83,7 +83,7 @@ input[type=range] { accent-color: var(--latex); }
 .spread input { accent-color: var(--shell); }
 .spread .mono { text-align: right; color: var(--text); }
 
-.busy { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(15, 16, 18, 0.55); backdrop-filter: blur(2px); }
+.busy { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(15, 16, 18, 0.62); }
 .busy-card { display: flex; gap: 16px; align-items: center; padding: 20px 24px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); min-width: 320px; }
 .busy-title { font-weight: 500; font-size: 16px; }
 .busy-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
@@ -581,3 +581,11 @@ body.no-panel .panel { display: none; }
 .draw-row .seg3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
 #drawLayer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
 #drawLayer polygon { fill: rgba(240, 160, 64, 0.12); stroke: #f0a040; stroke-width: 1.5; stroke-dasharray: 5 4; }
+#drawLayer line { stroke: #f0a040; stroke-width: 2; stroke-dasharray: 7 5; }
+#drawLayer circle { fill: #f0a040; }
+.btn.slice-go { width: 100%; margin: 8px 0 4px; border-color: var(--latex); color: var(--latex); font-weight: 500; }
+.btn.slice-go:hover { background: rgba(227, 163, 60, 0.1); }
+.slice-alts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 2px 0 8px; font-size: 12px; color: var(--muted, #9aa1a6); }
+.slice-alts button { padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line-2); background: transparent; color: var(--text); font-size: 12px; }
+.slice-alts button.on { border-color: var(--latex); color: var(--latex); }
+.slice-alts button:hover { border-color: #6a7177; }
