@@ -102,13 +102,13 @@ USE
          slivers. A part thinner than 20 mm is flagged in the list. Split
          and save parts
          saves "<name> - part 1.stl" and so on in the scan's folder, with
-         pegs on the part below each cut and matching holes in the part
-         above. Peg diameter, length and hole clearance are set there too.
+         one peg on the part below each cut and a matching hole in the part
+         above (one per separate bit of the cut). Peg diameter, length and hole clearance are set there too.
          Draw a cut: press Free line, Box or Ellipse, then drag on the view
          round the area you want as a part of its own, like a selection in
          a photo editor. The cut goes straight through the model the way
-         you're looking (turn the view first), and gets pegs on the part
-         inside pointing out into holes in the part round it. A free line
+         you're looking (turn the view first), and gets one peg on the part
+         inside pointing out into a hole in the part round it. A free line
          must be one loop that doesn't cross itself. Esc cancels; the x on
          the cut's row removes it.
          Pull the parts apart (under the cuts) spreads the model's parts

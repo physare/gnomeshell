@@ -578,7 +578,7 @@ def split(obj, cuts, peg_d=8.0, peg_len=10.0, clear=0.2, report=None, progress=N
                 if inn.all() or not inn.any():
                     nxt.append(part)  # this drawn cut misses this part
                     continue
-                spots = _shape_spots(co, tris, c, peg_d) if pegs_on else []
+                spots = _shape_spots(co, tris, c, peg_d, most=1) if pegs_on else []
                 pr = _prism(c, size)
                 inside = part.copy()
                 inside.data = part.data.copy()
@@ -607,7 +607,7 @@ def split(obj, cuts, peg_d=8.0, peg_len=10.0, clear=0.2, report=None, progress=N
             if d.min() >= -1e-6 or d.max() <= 1e-6 or not _applies(c, co, levels, cuts):
                 nxt.append(part)  # this cut misses this part
                 continue
-            spots = peg_spots(section_info(co, tris, p, n), peg_d) if pegs_on else []
+            spots = peg_spots(section_info(co, tris, p, n), peg_d, most=1) if pegs_on else []
             hs = ms._halfspace(p, n, size)
             up = part.copy()
             up.data = part.data.copy()
