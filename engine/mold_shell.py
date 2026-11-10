@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Mold Shell Builder",
     "author": "Gnome and Garden",
-    "version": (0, 15, 0),
+    "version": (0, 15, 1),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar (N) > Mold Shell",
     "description": "Builds a split, 3D-printable mother mold shell around a latex mold scan",
@@ -2559,6 +2559,63 @@ def write_3mf(path, named_meshes, bed_mm=None, arrange=False, keep=False):
         z.writestr("[Content_Types].xml", ct)
         z.writestr("_rels/.rels", rels)
         z.writestr("3D/3dmodel.model", model)
+    return path
+
+
+def write_bambu_project(path, plates, W, D):
+    """One 3MF with every plate in it, as Bambu Studio keeps a project: plates
+    is a list of plates, each a list of (name, verts_mm, tris) already set out
+    on a W x D plate. Bambu lays its plates out in a grid (columns: the
+    smallest square that holds them all), a fifth of a plate apart, the next
+    row toward -y; each object sits at its plate's spot in that grid, and
+    Metadata/model_settings.config says which plate each one is on. Other
+    slicers read it as one plate with everything on it, side by side."""
+    import zipfile
+    from xml.sax.saxutils import quoteattr
+    n = len(plates)
+    cols = max(1, int(math.ceil(math.sqrt(n))))
+    objs, items, conf, plate_conf = [], [], [], []
+    oid = 0
+    for k, pl in enumerate(plates):
+        ox, oy = (k % cols) * W * 1.2, -(k // cols) * D * 1.2
+        inst = []
+        for name, v, t in pl:
+            oid += 1
+            v = np.asarray(v, dtype=float)
+            c = np.array([(v[:, 0].min() + v[:, 0].max()) / 2, (v[:, 1].min() + v[:, 1].max()) / 2, 0.0])
+            lv = v - c
+            vs = "".join(f'<vertex x="{a:.5f}" y="{b:.5f}" z="{z:.5f}"/>' for a, b, z in lv)
+            ts = "".join(f'<triangle v1="{a}" v2="{b}" v3="{z}"/>' for a, b, z in t)
+            objs.append(f'<object id="{oid}" name={quoteattr(name)} type="model"><mesh><vertices>{vs}</vertices>'
+                        f'<triangles>{ts}</triangles></mesh></object>')
+            tx, ty = c[0] + ox, c[1] + oy
+            items.append(f'<item objectid="{oid}" transform="1 0 0 0 1 0 0 0 1 {tx:.5f} {ty:.5f} 0" printable="1"/>')
+            conf.append(f'  <object id="{oid}">\n    <metadata key="name" value={quoteattr(name)}/>\n    <metadata key="extruder" value="1"/>\n'
+                        f'    <part id="1" subtype="normal_part">\n      <metadata key="name" value={quoteattr(name)}/>\n    </part>\n  </object>')
+            inst.append(f'    <model_instance>\n      <metadata key="object_id" value="{oid}"/>\n      <metadata key="instance_id" value="0"/>\n'
+                        f'      <metadata key="identify_id" value="{100 + oid}"/>\n    </model_instance>')
+        plate_conf.append(f'  <plate>\n    <metadata key="plater_id" value="{k + 1}"/>\n    <metadata key="plater_name" value=""/>\n'
+                          f'    <metadata key="locked" value="false"/>\n' + "\n".join(inst) + '\n  </plate>')
+    model = ('<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" '
+             'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
+             'xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">'
+             '<metadata name="Application">BambuStudio-01.10.00.00</metadata>'
+             '<metadata name="BambuStudio:3mfVersion">1</metadata>'
+             '<metadata name="Title">GnomeShell shell</metadata><resources>'
+             + "".join(objs) + '</resources><build>' + "".join(items) + '</build></model>')
+    config = '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n' + "\n".join(conf + plate_conf) + '\n</config>\n'
+    ct = ('<?xml version="1.0" encoding="UTF-8"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+          '<Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>'
+          '<Default Extension="config" ContentType="text/xml"/></Types>')
+    rels = ('<?xml version="1.0" encoding="UTF-8"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Target="/3D/3dmodel.model" Id="rel0" '
+            'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>')
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", ct)
+        z.writestr("_rels/.rels", rels)
+        z.writestr("3D/3dmodel.model", model)
+        z.writestr("Metadata/model_settings.config", config)
     return path
 
 

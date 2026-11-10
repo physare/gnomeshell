@@ -45,7 +45,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.15.0"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.15.1"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -732,7 +732,12 @@ def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert
             else:
                 fname = f"plate {k}.3mf" if len(plan) > 1 else "shell.3mf"  # one plate: shell.3mf is laid out the same way
             ms.write_3mf(os.path.join(folder, fname), named, W, arrange=False, keep=True)
-            out.append({"items": pl, "file": fname, "kind": kind})
+            out.append({"items": pl, "file": fname, "kind": kind, "named": named})
+        # every plate in one Bambu Studio project too (one plate: shell.3mf already is that)
+        if len(out) > 1:
+            ms.write_bambu_project(os.path.join(folder, "shell.3mf" if kind == "shell" else "test_slices.3mf"), [o["named"] for o in out], W, D)
+        for o in out:
+            del o["named"]
         return out
 
     plates = lay_out(main, "shell") + lay_out(tests, "test")

@@ -258,14 +258,15 @@ USE
          the number of pieces set under Printer & cutting and never below
          Smallest piece. What it adds are normal cuts you can move or delete.
        - Pour collar: carries the base opening down so you have room to pour.
-       - Test slice: one for the whole mold, since once one piece fits they
-         all do. Pink in the view shows where it's cut, with a line where it
-         meets the latex (untick Test slices in the Show menu at the top to
-         hide it). Upright: across the main seam through the tallest point of
-         the latex. Level: Level slice height up the shell, clear of the
-         channels. Drag the pink dot to move it; it comes out of the piece
-         under the dot. "Put the slice back where it starts" (Settings tab,
-         Test slice) undoes the move, and so does Ctrl+Z.
+       - Test slice: one slice through the whole mold. Every piece it
+         crosses gets its own slice there, so together they go all the way
+         round the model. Pink in the view shows where it's cut, with a line
+         where it meets the latex (untick Test slices in the Show menu at
+         the top to hide it). Upright: across the main seam through the
+         tallest point of the latex. Level: Level slice height up the shell,
+         clear of the channels. Drag the pink dot to move it. "Put the slice
+         back where it starts" (Settings tab, Test slice) undoes the move,
+         and so does Ctrl+Z.
        - Insert tab (for big pieces, off until you tick it for a scan):
          a hollow silicone insert hangs in the latex so the casting comes out
          with a cavity. Pick round, oval, square or rectangle, and set its
@@ -334,7 +335,9 @@ USE
      old shell that no longer matches isn't left lying there.
      Build shell makes everything. Files go to Documents\Mold Shells\<scan name>\:
        test_slices.3mf + SHELL_n_TEST.stl   print these first to check the fit
-       shell.3mf + SHELL_n.stl              the shell pieces
+       shell.3mf + SHELL_n.stl              the shell pieces; shell.3mf is one
+                                            Bambu Studio project with every
+                                            plate in it
        plate 1.3mf, plate 2.3mf, ...        the pieces plate by plate, when
                                             they take more than one plate
        holder.3mf, insert_cup.3mf           only with the silicone insert on

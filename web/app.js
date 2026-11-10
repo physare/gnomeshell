@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.15.0"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.15.1"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -528,12 +528,12 @@ function drawScene(T, keepHandle) {
 // or through the middle of a piece that line misses. Level: partway up each
 // piece, stepped clear of the bungee channels.
 function contourStyle() { return S.settings?.shell_style === "CONTOUR"; }
-// One test slice for the whole mold: once one piece fits, they all do. Upright,
-// it runs across the main seam through the tallest point of the latex; level,
-// it sits Level slice height up the shell. Either way it can be dragged along
-// its normal (S.sliceAt, mm along it; null = where it starts). It comes out
-// of the piece under its pink dot. Returns one entry per piece, null but for
-// that one.
+// One test slice plane for the whole mold. Upright, it runs across the main
+// seam through the tallest point of the latex; level, it sits Level slice
+// height up the shell. Either way it can be dragged along its normal
+// (S.sliceAt, mm along it; null = where it starts). Every piece it crosses
+// gets its slice there, so together they go all the way round the model.
+// Returns one entry per piece, null for a piece the plane misses.
 function slicePlans(T) {
   if (!T || !S.cuts.length || !T.pieces.length || !latexMesh) return [];
   const t = +S.settings.test_slice_mm || 0.4;
@@ -562,18 +562,22 @@ function slicePlans(T) {
   } else d0 = n.dot(top);
   const d = S.sliceAt == null ? d0 : clamp(d0 + S.sliceAt, mnAll + t, mxAll - t);
   const at = top.clone().addScaledVector(n, d - n.dot(top)); // the pink dot: over the tallest point, on the slice
-  // the piece under the dot; failing that, the one the slice crosses nearest it
-  const inside = (P) => P.cells.some((ci) => T.cells[ci].hs.every((h) => h.n.x * at.x + h.n.y * at.y + h.n.z * at.z - h.d >= -0.01));
-  let k = T.pieces.findIndex(inside);
-  if (k < 0) {
-    let best = Infinity;
-    span.forEach((p, i) => { if (d < p.mn || d > p.mx) return; const dd = p.c.distanceTo(at); if (dd < best) { best = dd; k = i; } });
-    if (k < 0) k = 0;
-  }
+  // every piece the plane goes through (a sliver under 1 mm across doesn't count)
+  const crosses = (P) => P.cells.some((ci) => {
+    const cap = clipPolytope(T.cells[ci].poly, n, d, null).cap;
+    if (!cap) return false;
+    let w = 0; for (const a of cap) for (const b of cap) w = Math.max(w, a.distanceTo(b));
+    return w > 1;
+  });
   const moved = S.sliceAt != null && Math.abs(d - d0) > 0.5;
   const why = level ? `${Math.round(d - z0)} mm up` : moved ? `${Math.round(Math.abs(d - d0))} mm from the top of the latex` : "top of the latex";
-  const mid = span[k].c.clone().addScaledVector(n, d - n.dot(span[k].c));
-  return T.pieces.map((P, i) => (i === k ? { normal: n, d, d0, point: at, alt: mid, why, at, piece: i } : null));
+  const plans = T.pieces.map((P, i) => (crosses(P) ? { normal: n, d, d0, point: at, alt: span[i].c.clone().addScaledVector(n, d - n.dot(span[i].c)), why, at, piece: i } : null));
+  if (!plans.some(Boolean)) { // shouldn't happen: then the piece nearest the dot
+    let k = 0, best = Infinity;
+    span.forEach((p, i) => { const dd = p.c.distanceTo(at); if (dd < best) { best = dd; k = i; } });
+    plans[k] = { normal: n, d, d0, point: at, alt: span[k].c.clone().addScaledVector(n, d - n.dot(span[k].c)), why, at, piece: k };
+  }
+  return plans;
 }
 const planJSON = (pl) => pl && { point: pl.point.toArray(), normal: pl.normal.toArray(), alt: pl.alt ? pl.alt.toArray() : null, why: pl.why };
 // the line a plane draws across the latex, as flat segment pairs
@@ -664,9 +668,10 @@ function sliceNote(plans) {
   const el = $("#sliceNote");
   $("#sliceReset").hidden = S.sliceAt == null;
   if (!plans.length) { el.textContent = "Add a cut to see where the test slice goes."; return; }
-  const t = +S.settings.test_slice_mm || 0.4, pl = plans.find(Boolean);
-  const where = S.settings.test_slice_style === "HORIZONTAL" ? `one level ${t} mm slice, ${pl.why}` : `one upright ${t} mm slice across the main seam, through the ${pl.why === "top of the latex" ? "tallest point of the latex" : pl.why}`;
-  el.textContent = `Shown in pink in the view: ${where}, from piece ${pl.piece + 1}. One is enough: once it fits, they all do. Drag the pink dot to move it.`;
+  const t = +S.settings.test_slice_mm || 0.4, got = plans.filter(Boolean), pl = got[0];
+  const where = S.settings.test_slice_style === "HORIZONTAL" ? `a level ${t} mm slice, ${pl.why}` : `an upright ${t} mm slice across the main seam, through the ${pl.why === "top of the latex" ? "tallest point of the latex" : pl.why}`;
+  const nums = got.map((p) => p.piece + 1), list = nums.length > 1 ? `${nums.slice(0, -1).join(", ")} and ${nums.at(-1)}` : String(nums[0]);
+  el.textContent = `Shown in pink in the view: ${where}, through ${nums.length > 1 ? `pieces ${list}, so the slices go all the way round` : `piece ${list}`}. Drag the pink dot to move it.`;
 }
 // selection and hover colours, without rebuilding anything
 function highlight() {
@@ -3069,7 +3074,7 @@ async function showBuild(res) {
     <dt>Alignment bumps</dt><dd>${res.bumps || "none"}</dd>` : `<dt>Box</dt><dd>${d.join(" × ")} mm</dd>
     <dt>Bungee channels</dt><dd>${res.channels}${res.skipped_channels ? ` (${res.skipped_channels} skipped at a cut)` : ""}</dd>`) + `
     <dt>Fits your printer</dt><dd style="color:${res.fits_plate || (res.split_pieces || []).length ? "var(--ok)" : "#f08a70"}">${res.fits_plate ? "yes" : (res.split_pieces || []).length ? "each part does" : "no"}</dd>` + ((res.plates || []).length ? `
-    <dt>Plates</dt><dd>${res.plates.length}${res.plates.length > 1 ? ` · saved as ${res.plates.map((p) => p.file).join(", ")}` : " · shell.3mf"}</dd>` : "") + ((res.split_pieces || []).length ? `
+    <dt>Plates</dt><dd>${res.plates.length}${res.plates.filter((p) => p.kind !== "test").length > 1 ? ` · shell.3mf has every plate (one Bambu Studio project), and each is also saved on its own: ${res.plates.map((p) => p.file).join(", ")}` : " · shell.3mf"}</dd>` : "") + ((res.split_pieces || []).length ? `
     <dt>Split to fit</dt><dd>${res.split_pieces.every((s) => !s.pegs)
       ? `${res.split_pieces.map((s) => `${s.piece.replace("SHELL_", "piece ")} into ${s.parts}`).join(", ")}. Too thin for pegs: glue the parts together.`
       : res.split_pieces.map((s) => `${s.piece.replace("SHELL_", "piece ")} into ${s.parts}, ${s.pegs ? `${s.pegs} pegs` : "glue (too thin for pegs)"}`).join("; ")}</dd>` : "") + `
