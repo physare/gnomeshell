@@ -3436,10 +3436,43 @@ function askCloseTab(key) {
     st === "running" ? "It's building right now. The build carries on and its files are saved in the scan's folder, but you won't see it here. Your cuts are saved, and it's under Recent scans to open again." :
     st === "queued" ? "It's waiting to build. Closing it takes it out of the queue. Your cuts are saved, and it's under Recent scans to open again." :
     "Your cuts are saved, and it's under Recent scans (and the File menu) to open again.";
+  $("#closeAskYes").textContent = "Close tab";
   $("#closeAsk").hidden = false; $("#closeAskYes").focus();
   $("#closeAskYes").onclick = () => { $("#closeAsk").hidden = true; closeTab(key); };
 }
 $("#closeAskNo").onclick = () => { $("#closeAsk").hidden = true; };
+// Esc with nothing else to cancel asks to close GnomeShell. What Esc had to do
+// is noted before the other Esc handlers run (they clear picks, close menus,
+// stop a drawing), so one press does one thing.
+let escHadWork = false;
+addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const typing = e.target.matches?.("input, select, textarea");
+  const anyOpen = !$("#ctx").hidden || !$("#keys").hidden || !$("#closeAsk").hidden || busyNow() || $("#toggles").open;
+  const drawing = !!(shapeDraw || SPLIT.draw || cutLine || MASK.stroke || sizeDrag || optRun || insViewOn());
+  const picks = S.selPieces.size || S.selSegs.size || S.selCuts.size || S.active != null;
+  escHadWork = !!(typing || anyOpen || drawing || picks || (curTab() === "mask" && MASK.tool !== "view"));
+}, true);
+addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || e.defaultPrevented || escHadWork || e.repeat) return;
+  askQuit();
+});
+function askQuit() {
+  if (!$("#closeAsk").hidden) return;
+  const waiting = TABS.list.filter((t) => t.job && (t.job.state === "running" || t.job.state === "queued")).length;
+  $("#closeAskTitle").textContent = "Close GnomeShell?";
+  $("#closeAskText").textContent = waiting ?
+    `${waiting === 1 ? "One build hasn't" : `${waiting} builds haven't`} finished. ${waiting === 1 ? "It finishes" : "They finish"} in the background and ${waiting === 1 ? "its files are" : "their files are"} saved in the scan's folder. Your tabs and cuts are saved for next time.` :
+    "Your tabs and cuts are saved and come back next time.";
+  $("#closeAskYes").textContent = "Close GnomeShell";
+  $("#closeAsk").hidden = false; $("#closeAskYes").focus();
+  $("#closeAskYes").onclick = () => {
+    $("#closeAsk").hidden = true;
+    navigator.sendBeacon("/api/bye", "");
+    window.close();
+    setTimeout(() => toast("Use the X at the top right to close the window."), 400); // if this window can't close itself
+  };
+}
 $("#closeAsk").addEventListener("keydown", (e) => {
   if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); $("#closeAsk").hidden = true; }
   if (e.key === "Tab") { e.preventDefault(); (document.activeElement === $("#closeAskYes") ? $("#closeAskNo") : $("#closeAskYes")).focus(); }
