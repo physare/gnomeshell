@@ -611,3 +611,38 @@ body.no-panel .panel { display: none; }
 .pscan .ps-acts { display: flex; gap: 6px; flex-wrap: wrap; }
 .clean-warn { border-color: #6b5a2e; background: #2f2a1c; color: #f1e3c0; }
 .clean-warn[hidden] { display: none; }
+
+/* ---- scan tabs: one per open scan, like a browser's */
+.tabstrip { flex: none; display: flex; align-items: flex-end; gap: 2px; height: 36px; padding: 0 8px; background: var(--ground); border-bottom: 1px solid var(--line); }
+.tabs { display: flex; align-items: flex-end; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { position: relative; display: flex; align-items: center; gap: 7px; height: 30px; min-width: 120px; max-width: 220px; padding: 0 6px 0 12px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; user-select: none; flex: none; }
+.tab:hover { background: #1c1f22; color: var(--text); }
+.tab.on { background: var(--panel); border-color: var(--line); color: var(--text); margin-bottom: -1px; height: 31px; }
+.tab.on::after { content: ""; position: absolute; left: 10px; right: 10px; top: 0; height: 2px; border-radius: 0 0 2px 2px; background: var(--latex); }
+.tab .tname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab .tx { flex: none; width: 22px; height: 22px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--faint); font-size: 12px; line-height: 1; padding: 0; }
+.tab .tx:hover { background: #2f3438; color: var(--text); }
+.tab .tdot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.tab .tdot.done { background: var(--ok); }
+.tab .tdot.failed { background: var(--bad); }
+.tab .tdot.queued { background: transparent; border: 1.5px solid var(--faint); }
+.tab .tdot.running { width: 12px; height: 12px; border: 2px solid var(--line-2); border-top-color: var(--latex); animation: spin 0.9s linear infinite; }
+.tab:focus-visible { outline: 2px solid var(--latex); outline-offset: -2px; }
+.tab-new { flex: none; width: 28px; height: 28px; margin: 0 0 3px 4px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 19px; line-height: 1; padding: 0; }
+.tab-new:hover { background: #24282b; color: var(--text); }
+
+/* a build of this scan, queued or running in the background */
+.buildbar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 12px; padding: 9px 10px 9px 14px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line-2); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); max-width: min(560px, 80%); }
+.spinner.sm { width: 18px; height: 18px; border-width: 2px; flex: none; }
+.buildbar.queued .spinner { animation: none; border-top-color: var(--line-2); }
+.bb-text { min-width: 0; }
+.bb-title { font-weight: 500; font-size: 13px; }
+.bb-sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* are you sure? */
+.modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(10, 11, 12, 0.6); }
+.modal-card { width: min(420px, calc(100% - 32px)); padding: 20px 22px 18px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line-2); box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5); }
+.modal-title { font-weight: 500; font-size: 16px; }
+.modal-text { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 8px 0 18px; }
+.modal-btns { display: flex; justify-content: flex-end; gap: 8px; }

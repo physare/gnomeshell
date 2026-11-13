@@ -46,7 +46,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.15.2"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.16.0"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -188,7 +188,7 @@ def safe_name(name):
 
 def progress(msg):
     STATE["progress"] = msg
-    print("[mold shell]", msg, flush=True)
+    print("@@progress" if IS_WORKER else "[mold shell]", msg, flush=True)  # a queued build's progress goes back to the engine
 
 
 def _read_json(path, default=None):
@@ -226,6 +226,27 @@ def recent():
         out.append(r)
     out.sort(key=lambda r: r["when"], reverse=True)
     return out[:8]
+
+
+# The scans open in tabs, so they open again next time.
+TABS_FILE = os.path.join(OUT_ROOT, "tabs.json")
+
+
+def tabs_load():
+    t = _read_json(TABS_FILE, {}) or {}
+    names = [n for n in (t.get("tabs") or []) if isinstance(n, str) and os.path.isfile(os.path.join(OUT_ROOT, safe_name(n), "scan.stl"))]
+    active = t.get("active") if t.get("active") in names else (names[0] if names else None)
+    return {"tabs": names, "active": active}
+
+
+def tabs_save(data):
+    names = []
+    for n in data.get("tabs") or []:
+        if isinstance(n, str) and n and os.path.basename(n) == n and n not in (".", "..") and n not in names:
+            names.append(n)
+    active = data.get("active") if data.get("active") in names else None
+    _write_json(TABS_FILE, {"tabs": names[:30], "active": active})
+    return {"tabs": names[:30], "active": active}
 
 
 # ------------------------------------------------------- geometry jobs
@@ -1443,6 +1464,179 @@ def run_job(fn, *args):
     return box["result"]
 
 
+# ------------------------------------------------------------ build queue
+# Builds run one at a time in a Blender of their own, so the window stays free
+# to work on other scans (each in its own tab) while a shell builds. A build
+# waits its turn in the queue; it works from the scan as saved in its folder
+# (prepared.stl and prep.json, kept up to date as you go) and its own copy of
+# the cuts and settings.
+
+BUILDS = {"jobs": [], "next": 1, "lock": threading.Lock(), "wake": threading.Event()}
+WORKER_FLAG = "--build-worker"
+IS_WORKER = WORKER_FLAG in sys.argv
+
+
+def _build_public(j):
+    out = {k: j.get(k) for k in ("id", "name", "state", "progress", "error", "slices_only", "queued_at", "started_at")}
+    ahead = [x for x in BUILDS["jobs"] if x["state"] in ("queued", "running")]
+    out["place"] = next((k for k, x in enumerate(ahead) if x is j), None)  # 0: building now
+    if j["state"] == "done":
+        out["result"] = j.get("result")
+    return out
+
+
+def builds_list():
+    with BUILDS["lock"]:
+        return [_build_public(j) for j in BUILDS["jobs"]]
+
+
+def builds_waiting():
+    return any(j["state"] in ("queued", "running") for j in BUILDS["jobs"])
+
+
+def job_snapshot(path):
+    """The scan as it is now (sized, turned, trimmed...) for a queued build, so
+    changing it afterwards doesn't change a build that's waiting its turn."""
+    latex = _latex()
+    co, tris = ms._world_tris(latex)
+    ms._write_stl(path, co, tris)
+    return _spouts(latex)
+
+
+def build_enqueue(args, snap):
+    """Queue a build of the scan open now. A build of the same scan that hasn't
+    started yet is brought up to date instead of queued twice. snap(path) saves
+    the scan as it is now and gives back its spouts."""
+    name, folder = STATE.get("name"), STATE.get("folder")
+    if not STATE.get("latex") or not folder:
+        raise RuntimeError("Load a scan first.")
+    with BUILDS["lock"]:
+        same = next((j for j in BUILDS["jobs"] if j["name"] == name and j["state"] == "queued"), None)
+        bid = same["id"] if same else BUILDS["next"]
+        pdir = os.path.join(PREVIEW_DIR, f"build-{bid}")
+        os.makedirs(pdir, exist_ok=True)
+        spouts = snap(os.path.join(pdir, "scan.stl"))
+        if same:
+            same.update(args=args, spouts=spouts, slices_only=bool(args.get("slices_only")), queued_at=time.time())
+            j = same
+        else:
+            j = {"id": bid, "name": name, "folder": folder, "state": "queued", "progress": "Waiting its turn",
+                 "args": args, "spouts": spouts, "slices_only": bool(args.get("slices_only")), "queued_at": time.time(),
+                 "started_at": None, "error": None, "result": None, "proc": None}
+            BUILDS["next"] += 1
+            BUILDS["jobs"].append(j)
+        # finished builds of this scan are done with; only the newest one counts
+        BUILDS["jobs"] = [x for x in BUILDS["jobs"] if x is j or x["name"] != name or x["state"] in ("queued", "running")]
+        out = _build_public(j)
+    BUILDS["wake"].set()
+    return out
+
+
+def build_cancel(bid):
+    with BUILDS["lock"]:
+        j = next((x for x in BUILDS["jobs"] if x["id"] == bid), None)
+        if j is None:
+            return {"ok": True}
+        if j["state"] == "queued":
+            j.update(state="cancelled", progress="")
+        elif j["state"] == "running":
+            j["cancel"] = True
+            if j.get("proc") is not None:
+                try:
+                    j["proc"].kill()
+                except Exception:
+                    pass
+        else:  # finished: the window has seen it, forget it
+            BUILDS["jobs"].remove(j)
+    return {"ok": True}
+
+
+def _worker_cmd(job_path):
+    blender = getattr(bpy.app, "binary_path", "") or ""
+    me = os.path.abspath(__file__)
+    if blender and os.path.basename(blender).lower().startswith("blender"):
+        return [blender, "-b", "--factory-startup", "--python", me, "--", WORKER_FLAG, job_path]
+    return [sys.executable, me, WORKER_FLAG, job_path]  # Blender as a Python module (tests)
+
+
+def _run_build(j):
+    pdir = os.path.join(PREVIEW_DIR, f"build-{j['id']}")
+    os.makedirs(pdir, exist_ok=True)
+    job_path = os.path.join(pdir, "job.json")
+    _write_json(job_path, {"name": j["name"], "preview_dir": pdir, "url_dir": f"build-{j['id']}", "args": j["args"],
+                           "scan": os.path.join(pdir, "scan.stl"), "spouts": j.get("spouts") or []})
+    flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
+    proc = subprocess.Popen(_worker_cmd(job_path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            stdin=subprocess.DEVNULL, creationflags=flags, text=True, encoding="utf-8", errors="replace")
+    j["proc"] = proc
+    if j.get("cancel"):
+        proc.kill()
+    for line in proc.stdout:
+        line = line.rstrip()
+        if line.startswith("@@progress "):
+            j["progress"] = line[len("@@progress "):]
+        print("  [build " + str(j["id"]) + "]", line, flush=True)
+    proc.wait()
+    res = _read_json(os.path.join(pdir, "result.json"), None)
+    if j.get("cancel"):
+        j.update(state="cancelled", progress="Stopped")
+    elif res is None:
+        j.update(state="failed", error="The build stopped before it finished. Try again; if it keeps happening, send the GnomeShell.log in your Temp folder.")
+    elif res.get("error"):
+        j.update(state="failed", error=res["error"])
+    else:
+        j.update(state="done", result=res, progress="Done")
+    j["proc"] = None
+    j.pop("args", None)
+
+
+def _build_loop():
+    while True:
+        BUILDS["wake"].wait(1.0)
+        BUILDS["wake"].clear()
+        with BUILDS["lock"]:
+            j = next((x for x in BUILDS["jobs"] if x["state"] == "queued"), None)
+            if j is None or any(x["state"] == "running" for x in BUILDS["jobs"]):
+                continue
+            j.update(state="running", progress="Starting", started_at=time.time())
+        try:
+            _run_build(j)
+        except Exception as e:
+            traceback.print_exc()
+            j.update(state="failed", error=str(e), proc=None)
+        BUILDS["wake"].set()  # the next one, if any
+
+
+def worker_main(job_path):
+    """A build in a Blender of its own (see the build queue above)."""
+    global PREVIEW_DIR
+    job = _read_json(job_path, {})
+    shutil.rmtree(PREVIEW_DIR, ignore_errors=True)  # made on import; this build has its own
+    PREVIEW_DIR = job["preview_dir"]
+    out = os.path.join(PREVIEW_DIR, "result.json")
+    try:
+        a = job["args"]
+        progress("Opening the scan")
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        bpy.ops.wm.stl_import(filepath=job["scan"])
+        latex = bpy.context.selected_objects[0]
+        latex.name = "LATEX"
+        bpy.context.view_layer.objects.active = latex
+        STATE.update(latex=latex.name, name=job["name"], folder=os.path.join(OUT_ROOT, job["name"]))
+        if job.get("spouts"):
+            latex["spouts"] = json.dumps(job["spouts"])
+        res = job_build(a["cuts"], a["settings"], a.get("pieces"), a.get("frame"), bool(a.get("slices_only")),
+                        a.get("insert"), a.get("seam_cards"))
+        for p in res.get("previews", []):
+            p["url"] = p["url"].replace("/api/preview/", f"/api/preview/{job['url_dir']}/", 1)
+        _write_json(out, res)
+    except Exception as e:
+        traceback.print_exc()
+        _write_json(out, {"error": str(e) or e.__class__.__name__})
+    sys.stdout.flush()
+    os._exit(0)
+
+
 # ----------------------------------------------------------------- updates
 # New versions go to the public GitHub repo's main branch, with version.json
 # saying which version it is. The app checks that file once when it opens;
@@ -1608,7 +1802,14 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/recent":
             return self._send(200, recent())
         if p.startswith("/api/preview/"):
+            sub = p[len("/api/preview/"):].split("/")
+            if len(sub) == 2 and re.fullmatch(r"build-\d+", sub[0]):  # a queued build's own previews
+                return self._file(os.path.join(PREVIEW_DIR, sub[0], os.path.basename(sub[1])))
             return self._file(os.path.join(PREVIEW_DIR, os.path.basename(p)))
+        if p == "/api/builds":
+            return self._send(200, builds_list())
+        if p == "/api/tabs":
+            return self._send(200, tabs_load())
         if p == "/api/info":
             return self._send(200, {"out_root": OUT_ROOT, "blender": bpy.app.version_string,
                                     "version": APP_VERSION, "boot": BOOT})
@@ -1651,8 +1852,8 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/update_check":
                 return self._send(200, update_check(bool(data.get("force"))))
             if p == "/api/update_install":
-                if STATE["busy"]:
-                    raise RuntimeError("Wait for GnomeShell to finish what it's doing, then update.")
+                if STATE["busy"] or builds_waiting():
+                    raise RuntimeError("Wait for GnomeShell to finish what it's doing (and any builds in the queue), then update.")
                 return self._send(200, update_install())
             if p == "/api/load_recent":
                 return self._send(200, self._busy(job_load_recent, data["name"]))
@@ -1698,8 +1899,14 @@ class Handler(BaseHTTPRequestHandler):
                 settings.update({k: data.get("settings", {}).get(k, v) for k, v in settings.items()})
                 check_settings(settings)
                 save_settings(settings)
-                return self._send(200, self._busy(job_build, data["cuts"], settings, data.get("pieces"), data.get("frame"),
-                                                  bool(data.get("slices_only")), data.get("insert"), data.get("seam_cards")))
+                snap = lambda path: self._busy(job_snapshot, path)  # noqa: E731
+                return self._send(200, build_enqueue({"cuts": data["cuts"], "settings": settings, "pieces": data.get("pieces"),
+                                                      "frame": data.get("frame"), "slices_only": bool(data.get("slices_only")),
+                                                      "insert": data.get("insert"), "seam_cards": data.get("seam_cards")}, snap))
+            if p == "/api/build_cancel":
+                return self._send(200, build_cancel(int(data.get("id") or 0)))
+            if p == "/api/tabs":
+                return self._send(200, tabs_save(data))
             if p == "/api/insert":
                 settings = load_settings()
                 settings.update({k: data.get("settings", {}).get(k, v) for k, v in settings.items()})
@@ -1721,7 +1928,7 @@ class Handler(BaseHTTPRequestHandler):
             if p.startswith("/api/phone/"):
                 return self._send(200, self._phone(p, data))
             if p == "/api/open":
-                folder = STATE["folder"] or OUT_ROOT
+                folder = os.path.join(OUT_ROOT, safe_name(data["name"])) if data.get("name") else STATE["folder"] or OUT_ROOT  # name: a tab's scan
                 target = os.path.join(folder, "shell.3mf") if data.get("what") == "bambu" else \
                     os.path.join(folder, "test_slices.3mf") if data.get("what") == "slices" else folder
                 if hasattr(os, "startfile"):
@@ -1854,6 +2061,7 @@ def main():
         print("  No free port for GnomeShell. Close other GnomeShell windows, or end blender.exe in Task Manager.", flush=True)
         os._exit(1)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    threading.Thread(target=_build_loop, daemon=True).start()
     global PHONE
     try:
         PHONE = photoscan.PhoneLink(photoscan.Scans(OUT_ROOT), APP_VERSION)
@@ -1873,7 +2081,7 @@ def main():
         said_bye = STATE["bye_at"] and since(STATE["bye_at"]) > 15        # page closed and no window checked in since
         gone_quiet = STATE["last_ping"] and since(STATE["last_ping"]) > 180  # no window has checked in for 3 min
         never_came = not STATE["last_ping"] and now - started > 300         # the window never opened
-        building = PHONE is not None and PHONE.scans.busy() and not STATE["quit"]  # a phone scan finishes first
+        building = (PHONE is not None and PHONE.scans.busy() or builds_waiting()) and not STATE["quit"]  # a phone scan or queued build finishes first
         if (closed or said_bye or gone_quiet or never_came or STATE["quit"]) and not STATE["busy"] and not building:
             print("  Window closed, quitting." if not STATE["quit"] else "  A newer GnomeShell took over, quitting.", flush=True)
             shutil.rmtree(PREVIEW_DIR, ignore_errors=True)
@@ -1895,4 +2103,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if WORKER_FLAG in sys.argv:
+        worker_main(sys.argv[sys.argv.index(WORKER_FLAG) + 1])
     main()

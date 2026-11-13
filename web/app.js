@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.15.2"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.16.0"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -1572,6 +1572,7 @@ const KEYS = [
   ["← →", "On a slider: 1° or 1% (Shift: 5)"], ["O", "Optimize the open cut"], ["M", "Join the picked pieces"],
   ["H / Alt+H", "Hide the row picked in the Scene list / show everything"], ["X", "Overhangs in red on or off"], ["T", "Test slices on or off"],
   ["N", "Hide or show the side panel"], ["Ctrl+S", "Save this cut layout"], ["Ctrl+B", "Build the shell"],
+  ["Ctrl+T", "New tab, to open another scan"], ["Ctrl+W", "Close this tab (it asks first)"], ["Ctrl+Tab / Ctrl+Shift+Tab", "Next tab / the one before"],
   ["F", "Fit the view"], ["Numpad 1 / 3 / 7", "Front / side / top view"], ["Ctrl+Numpad 7", "From underneath"], ["1 / 2 / 3 / 4", "Scan / Cuts / Insert / Settings tab"], ["I", "Insert view, when the insert is on"], ["?", "Show these keys"],
 ];
 $("#keysList").innerHTML = KEYS.map(([k, v]) => `<dt class="mono">${k}</dt><dd>${v}</dd>`).join("");
@@ -1809,7 +1810,7 @@ async function saveLayout() {
 $("#layoutSave").onclick = saveLayout;
 $("#layoutName").addEventListener("keydown", (e) => { if (e.key === "Enter") saveLayout(); });
 
-async function showScan(info, keepCuts, restore) {
+async function showScan(info, keepCuts, restore, quiet) {
   S.scan = info;
   $("#fileName").textContent = info.file || info.name;
   $("#fileMeta").textContent = `${info.dims.join(" × ")} mm · ${info.triangles.toLocaleString()} triangles · ${info.watertight ? "watertight" : info.open_edges + " open edges"}`;
@@ -1849,8 +1850,8 @@ async function showScan(info, keepCuts, restore) {
   const back = restore && !info.grown && info.layouts && info.layouts.auto; // a layout made at the tiny size would be wrong now
   if (back && back.cuts && back.cuts.length) {
     mark(null); applyLayout(back); autoLast = JSON.stringify([S.cuts, S.joins, S.pulls]);
-    toast(`Brought back your last layout for this scan${info.prepared ? ", at the size you set" : ""}. Ctrl+Z gives the suggested first cut instead.`, true);
-  } else if (restore && info.prepared) toast("Opened at the size you set last time.", true);
+    if (!quiet) toast(`Brought back your last layout for this scan${info.prepared ? ", at the size you set" : ""}. Ctrl+Z gives the suggested first cut instead.`, true);
+  } else if (restore && info.prepared && !quiet) toast("Opened at the size you set last time.", true);
   updatePour();
   scanMarked();
 }
@@ -2864,19 +2865,13 @@ document.addEventListener("keydown", (e) => { const t = $("#toggles"); if (e.key
 async function takeFile(file) {
   if (!file) return;
   if (!/\.(stl|obj|ply|blend)$/i.test(file.name)) { toast("GnomeShell opens STL, OBJ, PLY and .blend files. Export the model as one of those and drag it in."); return; }
-  await withBusy("Loading scan", async () => {
-    const buf = await file.arrayBuffer();
-    const info = await api("/api/load", buf, file.name);
-    unitScale = 1; $$("[data-scale]").forEach((x) => x.classList.toggle("on", x.dataset.scale === "1"));
-    S.build = null; groups.pieces.clear(); groups.slices.clear();
-    go("cut"); await showScan(info, false, true); viewFrom("fit");
-    const big = Math.max(...info.dims);
-    if (info.grown) grownNote(info);
-    else if (big < 30) {
-      showTab("scan");
-      toast(`This scan is only ${big} mm across. If it was saved in cm or inches, pick that under "Scan was saved in".`);
-    }
-  });
+  let info = null;
+  await openInTab(null, async () => (info = await api("/api/load", await file.arrayBuffer(), file.name)));
+  const big = info ? Math.max(...info.dims) : 99;
+  if (info && !info.grown && big < 30) {
+    showTab("scan");
+    toast(`This scan is only ${big} mm across. If it was saved in cm or inches, pick that under "Scan was saved in".`);
+  }
 }
 $("#fileInput").onchange = (e) => takeFile(e.target.files[0]);
 const view = $("#view");
@@ -2891,24 +2886,20 @@ function grownNote(info) {
     `GnomeShell made it ${info.grown.factor}× bigger: it's now ${fmtDims(info.size || info.dims)} mm. If that isn't right, type the real size under Size.`, true);
 }
 async function openRecent(name) {
-  await withBusy("Loading scan", async () => {
-    const info = await api("/api/load_recent", { name });
-    S.build = null; groups.pieces.clear(); groups.slices.clear();
-    go("cut"); await showScan(info, false, true); viewFrom("fit");
-    if (info.grown) grownNote(info);
-  });
+  await openInTab(name, () => api("/api/load_recent", { name }));
 }
 async function fileMenu() {
   const b = $("#fileMenu"), r = b.getBoundingClientRect();
   const list = (await api("/api/recent").catch(() => null)) || [];
   const here = S.scan && S.scan.name;
-  const items = [{ label: "Open scan…", key: "Ctrl+O", act: () => $("#fileInput").click() }];
+  const items = [{ label: "New tab", key: "Ctrl+T", act: () => newTab() }, { label: "Open scan…", key: "Ctrl+O", act: () => $("#fileInput").click() }];
   const recent = list.filter((x) => x.name !== here).slice(0, 8);
   if (recent.length) {
     items.push("-");
     recent.forEach((x) => items.push({ label: x.name, act: () => openRecent(x.name) }));
   }
-  items.push("-", { label: "Show this scan's folder", disabled: !here, act: () => api("/api/open", { what: "folder" }).catch((e) => toast(e.message)) });
+  items.push("-", { label: "Show this scan's folder", disabled: !here, act: () => api("/api/open", { what: "folder", name: here }).catch((e) => toast(e.message)) });
+  items.push({ label: "Close tab", key: "Ctrl+W", disabled: TABS.active == null, act: () => askCloseTab(TABS.active) });
   openMenu(r.left, r.bottom + 2, items);
   $("#ctx").classList.add("file-menu");
 }
@@ -2927,12 +2918,7 @@ async function loadRecent() {
     const what = r.built_at && r.built_at >= (r.saved_at || "") ? (r.slices_only ? `test slices cut ${r.built_at.slice(0, 10)}` : `${r.pieces} pieces · built ${r.built_at.slice(0, 10)}`) : `layout saved ${(r.saved_at || "").slice(0, 10)}`;
     b.innerHTML = `<span class="strong"></span><span class="mono">${dims}${what}${r.layouts ? ` · ${r.layouts} saved` : ""}</span>`;
     b.querySelector(".strong").textContent = r.name;
-    b.onclick = () => withBusy("Loading scan", async () => {
-      const info = await api("/api/load_recent", { name: r.name });
-      S.build = null; groups.pieces.clear(); groups.slices.clear();
-      go("cut"); await showScan(info, false, true); viewFrom("fit");
-      if (info.grown) grownNote(info);
-    });
+    b.onclick = () => openRecent(r.name);
     box.appendChild(b);
   });
 }
@@ -2986,13 +2972,7 @@ async function loadPhone() {
   });
 }
 async function openPhoneScan(id) {
-  await withBusy("Loading scan", async () => {
-    const info = await api("/api/phone/open", { id });
-    unitScale = 1; $$("[data-scale]").forEach((x) => x.classList.toggle("on", x.dataset.scale === "1"));
-    S.build = null; groups.pieces.clear(); groups.slices.clear();
-    go("cut"); await showScan(info, false, true); viewFrom("fit");
-    if (info.grown) grownNote(info);
-  });
+  await openInTab(null, () => api("/api/phone/open", { id }));
 }
 $("#phoneNewCode").onclick = () => api("/api/phone/settings", { new_code: true }).then(() => { phoneSig = ""; loadPhone(); toast("New code made. Type it into the phone app.", true); }).catch((e) => toast(e.message));
 $("#phoneDetail").onchange = (e) => api("/api/phone/settings", { detail: e.target.value }).catch((e2) => toast(e2.message));
@@ -3017,10 +2997,15 @@ function startBuild(slicesOnly) {
   }
   const plans = T.slicePlans || slicePlans(T);
   const pieces = T.pieces.map((P, i) => ({ id: P.id, ...pieceSpec(T, P), pull: T.pull[i].toArray(), order: T.order[i], slice: planJSON(plans[i]) }));
-  withBusy(slicesOnly ? "Cutting the test slices" : "Building the shell", async () => {
-    const res = await api("/api/build", { cuts, pieces, frame: [T.frame.ex.toArray(), T.frame.ey.toArray()], settings: S.settings, slices_only: !!slicesOnly, insert: slicesOnly ? null : insSpec(), seam_cards: slicesOnly ? [] : SEAM.cards });
-    S.build = res; setShow(res.slices_only ? "latex" : "shell"); await showBuild(res); go("done"); viewFrom("fit");
-  }, true);
+  // it goes in the engine's queue and builds in the background; buildFinished() shows it when it's done
+  const tab = tabNow();
+  api("/api/build", { cuts, pieces, frame: [T.frame.ex.toArray(), T.frame.ey.toArray()], settings: S.settings, slices_only: !!slicesOnly, insert: slicesOnly ? null : insSpec(), seam_cards: slicesOnly ? [] : SEAM.cards })
+    .then((j) => {
+      if (tab) { tab.job = j; tab.unseen = false; }
+      renderTabs(); pollBuilds();
+      if (j.place) toast(`${j.place === 1 ? "1 build is" : `${j.place} builds are`} ahead of this one. It starts by itself; you can keep working.`, true);
+    })
+    .catch((e) => toast(e.message));
 }
 $("#build").onclick = () => startBuild(false);
 $("#buildSlices").onclick = () => startBuild(true);
@@ -3180,9 +3165,9 @@ $$("#doneTools [data-show]").forEach((b) => b.onclick = () => {
   else if (b.dataset.show === "plates") { groups.plates.visible = true; framePlates(); }
   else viewFrom("fit");
 });
-$("#openBambu").onclick = () => api("/api/open", { what: "bambu" }).catch((e) => toast(e.message));
-$("#openSlices").onclick = () => api("/api/open", { what: "slices" }).catch((e) => toast(e.message));
-$("#openFolder").onclick = () => api("/api/open", { what: "folder" }).catch((e) => toast(e.message));
+$("#openBambu").onclick = () => api("/api/open", { what: "bambu", name: S.build?.name || S.scan?.name }).catch((e) => toast(e.message));
+$("#openSlices").onclick = () => api("/api/open", { what: "slices", name: S.build?.name || S.scan?.name }).catch((e) => toast(e.message));
+$("#openFolder").onclick = () => api("/api/open", { what: "folder", name: S.build?.name || S.scan?.name }).catch((e) => toast(e.message));
 $("#backCuts").onclick = () => go("cut");
 
 // ------------------------------------------------------------ busy + toast
@@ -3273,6 +3258,270 @@ $("#updGo").onclick = () => {
 };
 addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", ""));
 
+// ------------------------------------------------------------ scan tabs
+// Each open scan has a tab, like a browser's. The engine works on one scan at a
+// time, so switching tabs opens that scan again (its cuts come back from the
+// layout kept as you go) and puts back what the window showed: the step, the
+// side panel tab, the view, the build, and the seam cards, printer cuts, gap
+// webs and base you were trying. Builds wait their turn in the engine's queue
+// and run in the background, so you can keep working in another tab.
+const TABS = { list: [], active: null, seq: 1, saveT: null, poll: null };
+function tabNow() { return TABS.list.find((t) => t.key === TABS.active) || null; }
+function tabMake(name) { return { key: TABS.seq++, name: name || null, ui: null, job: null, unseen: false }; }
+function tabsSaveSoon() {
+  clearTimeout(TABS.saveT);
+  TABS.saveT = setTimeout(() => {
+    const names = TABS.list.filter((t) => t.name).map((t) => t.name);
+    api("/api/tabs", { tabs: names, active: tabNow()?.name || null }).catch(() => {});
+  }, 300);
+}
+function renderTabs() {
+  const box = $("#tabs"); box.innerHTML = "";
+  for (const t of TABS.list) {
+    const el = document.createElement("div");
+    el.className = "tab" + (t.key === TABS.active ? " on" : ""); el.setAttribute("role", "tab"); el.tabIndex = t.key === TABS.active ? 0 : -1;
+    el.setAttribute("aria-selected", String(t.key === TABS.active)); el.dataset.key = t.key;
+    const st = t.job ? t.job.state : null;
+    const dot = st === "running" ? "running" : st === "queued" ? "queued" : st === "failed" && t.unseen ? "failed" : st === "done" && t.unseen ? "done" : "";
+    el.innerHTML = `${dot ? `<span class="tdot ${dot}" aria-hidden="true"></span>` : ""}<span class="tname"></span><button type="button" class="tx" aria-label="Close tab" title="Close tab (Ctrl+W)">✕</button>`;
+    el.querySelector(".tname").textContent = t.name || "New tab";
+    el.title = (t.name || "New tab") + (st === "running" ? ` · building: ${t.job.progress || ""}` : st === "queued" ? " · waiting to build" :
+      st === "done" && t.unseen ? " · built" : st === "failed" && t.unseen ? " · the build didn't finish" : "");
+    el.onclick = (e) => { if (!e.target.closest(".tx")) switchTab(t.key); };
+    el.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); askCloseTab(t.key); } }; // middle click closes, as in a browser
+    el.querySelector(".tx").onclick = (e) => { e.stopPropagation(); askCloseTab(t.key); };
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") { e.preventDefault(); stepTab(e.key === "ArrowRight" ? 1 : -1); }
+      if (e.key === "Delete") { e.preventDefault(); askCloseTab(t.key); }
+    });
+    box.appendChild(el);
+  }
+  box.querySelector(".tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  buildBar();
+}
+// what the window shows for the scan open now, to put back when you come back to its tab
+function stashTab() {
+  const t = tabNow();
+  if (!t || !t.name || !S.scan || S.scan.name !== t.name) return;
+  t.ui = {
+    step: S.step, side: curTab(), show: S.show, build: S.build,
+    cam: [camera.position.toArray(), orbit.target.toArray()],
+    unit: unitScale, seam: JSON.parse(JSON.stringify(SEAM.cards)), split: JSON.parse(JSON.stringify(SPLIT.cuts)), webs: JSON.parse(JSON.stringify(WEB.webs)),
+    base: { h: $("#baseH").value, f: $("#baseF").value, m: $("#baseM").value, r: $("#baseR").value, w: $("#baseW").value, shape: baseShape(), reachSet },
+  };
+}
+async function saveLayoutNow() { // the cuts, saved before the engine moves to another scan
+  clearTimeout(autoT);
+  if (!S.scan || !S.T) return;
+  const L = layoutNow(), key = JSON.stringify([L.cuts, L.joins, L.pulls, L.insert, L.slice_at]);
+  if (key === autoLast) return;
+  autoLast = key;
+  await api("/api/layouts", { op: "auto", layout: L }).catch(() => {});
+}
+async function unstashTab(t, info) {
+  const u = t.ui;
+  drawSizer(); // a different scan: clears the last one's seam cards, printer cuts and webs
+  if (u) {
+    unitScale = u.unit || 1; $$("[data-scale]").forEach((x) => x.classList.toggle("on", +x.dataset.scale === unitScale));
+    SPLIT.cuts = u.split || []; SPLIT.parts = []; renderSplit();
+    SEAM.cards = u.seam || []; renderSeam(); updateSeam();
+    WEB.webs = u.webs || []; renderWebs(); if (WEB.webs.length) updateWebs();
+    const b = u.base || {};
+    $("#baseF").value = b.f ?? $("#baseF").value; $("#baseM").value = b.m ?? $("#baseM").value; $("#baseW").value = b.w ?? $("#baseW").value;
+    $$("#baseShape [data-bshape]").forEach((x) => x.classList.toggle("on", x.dataset.bshape === (b.shape || "outline")));
+    reachSet = !!b.reachSet; $("#baseR").value = b.r ?? 0;
+    if (+b.h) { $("#baseH").value = b.h; baseLabels(); updateBase(); }
+    if (u.side) showTab(u.side);
+  } else {
+    unitScale = 1; $$("[data-scale]").forEach((x) => x.classList.toggle("on", x.dataset.scale === "1"));
+  }
+  drawSizer();
+  // a build that finished while you were away shows first
+  const fresh = t.unseen && t.job && t.job.state === "done" ? t.job.result : null;
+  const res = fresh || (u && u.build) || null;
+  if (res) { S.build = res; setShow(fresh ? (res.slices_only ? "latex" : "shell") : u.show || "shell"); await showBuild(res); }
+  const step = fresh ? "done" : u && u.step !== "load" && !(u.step === "done" && !res) ? u.step : "cut";
+  go(step);
+  if (u && !fresh) { camera.position.fromArray(u.cam[0]); orbit.target.fromArray(u.cam[1]); orbit.update(); }
+  else viewFrom("fit");
+  if (t.unseen && t.job && t.job.state === "failed") toast(`The last build of ${t.name} didn't finish: ${t.job.error}`);
+  t.unseen = false;
+}
+function showBlank() { // a new tab: the Load scan screen
+  S.scan = null; S.build = null; S.T = null; groups.pieces.clear(); groups.slices.clear(); groups.latex.clear(); latexMesh = null;
+  $("#fileName").textContent = ""; $("#fileMeta").textContent = "Open a scan in this tab"; $("#fileMeta").classList.remove("bad");
+  go("load");
+}
+async function switchTab(key) {
+  if (busyNow() || key === TABS.active) return;
+  const to = TABS.list.find((t) => t.key === key);
+  if (!to) return;
+  stashTab(); await saveLayoutNow();
+  const from = TABS.active;
+  TABS.active = key; renderTabs(); tabsSaveSoon();
+  if (!to.name) { showBlank(); return; }
+  let ok = false;
+  await withBusy(`Opening ${to.name}`, async () => {
+    const info = await api("/api/load_recent", { name: to.name });
+    S.build = null; groups.pieces.clear(); groups.slices.clear();
+    go("cut"); await showScan(info, false, true, true);
+    await unstashTab(to, info);
+    ok = true;
+  });
+  if (!ok) {
+    if (TABS.list.some((t) => t.key === from)) { TABS.active = from; tabsSaveSoon(); } // the engine still has the last scan
+    else showBlank();
+  }
+  renderTabs();
+  return ok;
+}
+function stepTab(d) {
+  if (TABS.list.length < 2) return;
+  const i = TABS.list.findIndex((t) => t.key === TABS.active);
+  switchTab(TABS.list[(i + d + TABS.list.length) % TABS.list.length].key);
+}
+async function newTab() {
+  if (busyNow()) return;
+  const blank = TABS.list.find((t) => !t.name);
+  if (blank) { await switchTab(blank.key); return; }
+  stashTab(); await saveLayoutNow();
+  const i = TABS.list.findIndex((t) => t.key === TABS.active);
+  const t = tabMake(null); TABS.list.splice(i + 1, 0, t);
+  TABS.active = t.key; renderTabs(); showBlank();
+}
+// Opening a scan: into this tab if it's a new one, its own tab if it's already
+// open, or else a new tab beside this one. load() asks the engine for it.
+async function openInTab(name, load, title = "Loading scan") {
+  if (busyNow()) return;
+  const open = name && TABS.list.find((t) => t.name === name);
+  if (open) { if (open.key !== TABS.active) await switchTab(open.key); return; }
+  const from = tabNow();
+  stashTab(); await saveLayoutNow();
+  let t = from && !from.name ? from : null;
+  const made = !t;
+  if (made) { t = tabMake(null); TABS.list.splice(TABS.list.indexOf(from) + 1, 0, t); TABS.active = t.key; renderTabs(); }
+  let ok = false;
+  await withBusy(title, async () => {
+    const info = await load();
+    unitScale = 1; $$("[data-scale]").forEach((x) => x.classList.toggle("on", x.dataset.scale === "1"));
+    S.build = null; groups.pieces.clear(); groups.slices.clear();
+    const dup = TABS.list.find((x) => x !== t && x.name === info.name); // the same scan loaded again from its file
+    if (dup) TABS.list.splice(TABS.list.indexOf(dup), 1);
+    t.name = info.name; t.ui = null; t.unseen = false; t.job = null;
+    go("cut"); await showScan(info, false, true); viewFrom("fit");
+    if (info.grown) grownNote(info);
+    ok = true;
+    return info;
+  });
+  if (!ok && made) { TABS.list.splice(TABS.list.indexOf(t), 1); TABS.active = from ? from.key : null; }
+  renderTabs(); tabsSaveSoon(); pollBuilds();
+  return ok;
+}
+// closing asks first; the scan itself, its cuts and its files stay on disk
+function askCloseTab(key) {
+  if (busyNow() || !$("#closeAsk").hidden) return;
+  const t = TABS.list.find((x) => x.key === key);
+  if (!t) return;
+  const st = t.job?.state;
+  $("#closeAskTitle").textContent = `Close ${t.name || "this new tab"}?`;
+  $("#closeAskText").textContent = !t.name ? "Nothing is open in it." :
+    st === "running" ? "It's building right now. The build carries on and its files are saved in the scan's folder, but you won't see it here. Your cuts are saved, and it's under Recent scans to open again." :
+    st === "queued" ? "It's waiting to build. Closing it takes it out of the queue. Your cuts are saved, and it's under Recent scans to open again." :
+    "Your cuts are saved, and it's under Recent scans (and the File menu) to open again.";
+  $("#closeAsk").hidden = false; $("#closeAskYes").focus();
+  $("#closeAskYes").onclick = () => { $("#closeAsk").hidden = true; closeTab(key); };
+}
+$("#closeAskNo").onclick = () => { $("#closeAsk").hidden = true; };
+$("#closeAsk").addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); $("#closeAsk").hidden = true; }
+  if (e.key === "Tab") { e.preventDefault(); (document.activeElement === $("#closeAskYes") ? $("#closeAskNo") : $("#closeAskYes")).focus(); }
+});
+$("#closeAsk").addEventListener("pointerdown", (e) => { if (e.target === $("#closeAsk")) $("#closeAsk").hidden = true; });
+async function closeTab(key) {
+  const i = TABS.list.findIndex((t) => t.key === key);
+  if (i < 0) return;
+  const t = TABS.list[i];
+  if (t.job && t.job.state === "queued") api("/api/build_cancel", { id: t.job.id }).catch(() => {});
+  const wasActive = key === TABS.active;
+  if (wasActive) await saveLayoutNow();
+  TABS.list.splice(i, 1);
+  if (!wasActive) { renderTabs(); tabsSaveSoon(); return; }
+  const next = TABS.list[i] || TABS.list[i - 1];
+  if (!next) { const b = tabMake(null); TABS.list.push(b); TABS.active = b.key; renderTabs(); tabsSaveSoon(); showBlank(); return; }
+  TABS.active = null; // nothing to keep from the closed one
+  await switchTab(next.key);
+  tabsSaveSoon();
+}
+$("#tabNew").onclick = () => newTab();
+// keys: Ctrl+W close, Ctrl+T new, Ctrl+Tab / Ctrl+Shift+Tab (and Ctrl+PageDown / PageUp) next and back
+addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === "w") { e.preventDefault(); if (TABS.active != null) askCloseTab(TABS.active); }
+  else if (k === "t" && !e.shiftKey) { e.preventDefault(); newTab(); }
+  else if (k === "tab") { e.preventDefault(); stepTab(e.shiftKey ? -1 : 1); }
+  else if (k === "pagedown" || k === "pageup") { e.preventDefault(); stepTab(k === "pagedown" ? 1 : -1); }
+}, true);
+
+// ---- the build queue, as each tab sees it
+function buildBar() {
+  const t = tabNow(), j = t && t.job, st = j && j.state;
+  const on = st === "running" || st === "queued";
+  $("#buildBar").hidden = !on;
+  if (!on) return;
+  const what = j.slices_only ? "test slices" : "shell";
+  $("#buildBar").classList.toggle("queued", st === "queued");
+  $("#bbTitle").textContent = st === "running" ? (j.slices_only ? "Cutting the test slices…" : "Building the shell…") :
+    `Waiting to build the ${what}: ${j.place === 1 ? "1 build" : `${j.place} builds`} ahead`;
+  $("#bbSub").textContent = st === "running" ? (j.progress || "") + " · you can keep working, or open another tab" : "It starts by itself when the one before it is done.";
+  $("#bbStop").textContent = st === "running" ? "Stop" : "Take it out";
+  $("#bbStop").onclick = () => api("/api/build_cancel", { id: j.id }).then(pollBuilds).catch((e) => toast(e.message));
+}
+let buildsBusy = false, buildsAgain = false;
+async function pollBuilds() {
+  if (buildsBusy) { buildsAgain = true; return; }
+  buildsBusy = true; buildsAgain = false;
+  try {
+    const list = await api("/api/builds");
+    for (const t of TABS.list) {
+      if (!t.name) continue;
+      const j = list.filter((x) => x.name === t.name).pop() || null;
+      const was = t.job && t.job.state;
+      if (!j || !t.job || j.id !== t.job.id || j.state !== was || j.progress !== t.job.progress || j.place !== t.job.place) {
+        const finished = (was === "running" || was === "queued") && j && j.id === t.job?.id && (j.state === "done" || j.state === "failed");
+        t.job = j;
+        if (finished) await buildFinished(t);
+      }
+    }
+    renderTabs();
+  } catch (e) { /* engine busy or gone: try again next time */ } finally { buildsBusy = false; }
+  clearTimeout(TABS.poll);
+  const waiting = TABS.list.some((t) => t.job && (t.job.state === "running" || t.job.state === "queued"));
+  TABS.poll = setTimeout(pollBuilds, waiting || buildsAgain ? (buildsAgain ? 0 : 1000) : 5000);
+}
+async function buildFinished(t) {
+  const j = t.job, here = t.key === TABS.active && S.scan && S.scan.name === t.name && !busyNow();
+  if (j.state === "failed") {
+    if (here) toast(j.error); else { t.unseen = true; toast(`${t.name}: the build didn't finish. ${j.error}`); }
+    return;
+  }
+  if (!here) { t.unseen = true; toast(`${t.name} is ${j.slices_only ? "sliced" : "built"}. Its tab has it.`, true); return; }
+  S.build = j.result; setShow(j.result.slices_only ? "latex" : "shell"); await showBuild(j.result); go("done"); viewFrom("fit");
+}
+// the tabs you had open come back when GnomeShell starts
+async function startTabs() {
+  let saved = null;
+  try { saved = await api("/api/tabs"); } catch (e) { /* none */ }
+  const names = (saved && saved.tabs) || [];
+  TABS.list = names.map((n) => tabMake(n));
+  if (!TABS.list.length) TABS.list.push(tabMake(null));
+  const first = TABS.list.find((t) => t.name === saved?.active) || TABS.list[0];
+  if (!first.name) { TABS.active = first.key; renderTabs(); pollBuilds(); return; }
+  TABS.active = null; renderTabs();
+  await switchTab(first.key);
+  pollBuilds();
+}
+
 // ------------------------------------------------------------ start
 (async function start() {
   resize(); viewFrom("fit"); go("load");
@@ -3287,6 +3536,7 @@ addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", ""));
     $("#fileMeta").textContent = "Engine not running"; toast("Can't reach the engine. Start GnomeShell from its shortcut.");
   }
   fillSettings(); loadRecent(); loadPhone();
+  await startTabs();
 })();
 
 // ------------------------------------------------------------ silicone insert
