@@ -441,32 +441,42 @@
           </details>
 
           <div class="mask-pane" data-in="mask">
-            <div class="head-row h2help"><h2>Paint mask</h2><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="A thin cover that fits over the piece, with openings where the paint goes. Paint the area to cover, rub out the openings (the eyes, say), and build it. Tape it on and spray through the openings.">?</span></div>
-            <p class="muted small" id="maskIntro">Turn the view to face the area, draw round it (the face, say) with Paint on, then switch to Rub out and draw round each opening (the eyes). Whatever you can see inside the outline is painted or rubbed out. Alt-drag turns the view while drawing.</p>
+            <div class="head-row h2help"><h2>Paint mask</h2><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="A thin cover that fits over the piece, with openings where the paint goes. Select the area to cover, subtract the openings (the eyes, say), and build it. Tape it on and spray through the openings.">?</span></div>
+            <p class="muted small" id="maskIntro">Find raised features picks out bumps like the eyes and puts the mask round them. To draw it yourself, pick Ellipse, Box or Free line and draw round the area with Add, then round each opening with Subtract. With no tool picked, dragging turns the view; Esc puts the tool down.</p>
+            <button type="button" class="btn sm" id="maskFind" title="Looks for bumps that stand up from the surface round them, like eyes, and makes the mask round the ones you tick">Find raised features</button>
+            <div id="maskFeat" hidden>
+              <div id="maskFeatList" class="mask-feats"></div>
+              <div class="fields">
+                <label for="maskReach">Mask reaches (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="How far the mask goes past the edge of each opening.">?</span><input id="maskReach" type="number" step="1" min="2" max="80" value="12"></label>
+                <label for="maskMargin">Opening margin (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="How far past the raised feature's edge each opening goes. Above 0 sprays a little round it; below 0 keeps the paint inside it.">?</span><input id="maskMargin" type="number" step="0.25" min="-5" max="10" value="0.5"></label>
+                <label for="maskFeatSize">Feature size (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="About how wide the features to find are. Find again after changing it.">?</span><input id="maskFeatSize" type="number" step="1" min="2" max="200"></label>
+              </div>
+            </div>
             <div class="seg four" role="group" aria-label="Draw with" id="maskTool">
-              <button type="button" data-tool="ellipse" class="on" title="Drag an ellipse round the area. Shift makes a circle. (O)">Ellipse</button>
+              <button type="button" data-tool="ellipse" title="Drag an ellipse round the area. Shift makes a circle. Click again or press Esc to put it down. (O)">Ellipse</button>
               <button type="button" data-tool="box" title="Drag a box round the area. Shift makes a square. (X)">Box</button>
               <button type="button" data-tool="free" title="Draw a loop round the area by hand (F)">Free line</button>
-              <button type="button" data-tool="brush" title="Paint or rub out by dragging on the model, for touching up (U)">Brush</button>
+              <button type="button" data-tool="brush" title="Add or subtract by dragging on the model, for touching up (U)">Brush</button>
             </div>
-            <div class="seg" role="group" aria-label="Paint or rub out" id="maskBrush">
-              <button type="button" data-brush="add" class="on" title="Paint the area the mask covers (B)">Paint</button>
-              <button type="button" data-brush="erase" title="Rub out: makes an opening (E)">Rub out</button>
+            <div class="seg" role="group" aria-label="Add or subtract" id="maskBrush">
+              <button type="button" data-brush="add" class="on" title="Add to the area the mask covers (B)">Add</button>
+              <button type="button" data-brush="erase" title="Subtract from the mask: makes an opening (E)">Subtract</button>
             </div>
             <label class="slider" for="maskSize" id="maskSizeBox" hidden>Brush size<input id="maskSize" type="range" min="1" max="40" step="0.5" value="6"><span class="mono" id="maskSizeV">6 mm</span></label>
             <div class="btn-grid">
-              <button type="button" class="btn sm" id="maskFacing" title="Paints everything on the model that faces you now. Turn the view to face the side you want covered first.">Paint what faces me</button>
-              <button type="button" class="btn sm" id="maskInvert" title="Painted becomes bare and bare becomes painted">Swap painted and bare</button>
-              <button type="button" class="btn sm" id="maskGrow" title="Paints one more row of triangles all round the painted area">Grow</button>
-              <button type="button" class="btn sm" id="maskShrink" title="Takes one row of triangles off all round the painted area, openings included">Shrink</button>
+              <button type="button" class="btn sm" id="maskFacing" title="Selects everything on the model that faces you now. Turn the view to face the side you want covered first.">Select facing side</button>
+              <button type="button" class="btn sm" id="maskInvert" title="The selected area becomes unselected and the rest becomes selected">Invert selection</button>
+              <button type="button" class="btn sm" id="maskGrow" title="Moves the edge of the mask out by 1 mm all round, openings included">Expand</button>
+              <button type="button" class="btn sm" id="maskShrink" title="Moves the edge of the mask in by 1 mm all round, openings included">Contract</button>
             </div>
-            <button type="button" class="btn sm" id="maskClear">Rub it all out</button>
+            <button type="button" class="btn sm" id="maskClear" title="Clears the selection and removes the built mask from the view. Ctrl+Z brings the selection back.">Clear mask</button>
             <dl class="kv" id="maskKv"></dl>
             <div class="fields">
               <label for="mask_t_mm">Thickness (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="How thick the mask is. 1.2 is three lines on a 0.4 mm nozzle.">?</span><input id="mask_t_mm" data-set type="number" step="0.1" min="0.4" max="10"></label>
               <label for="mask_gap_mm">Gap (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="How far the mask sits off the model, so it doesn't rub the paint. 0.1 is snug without rubbing. If this scan is of the latex mold and not the piece itself, set it to minus the latex's thickness (say -2.7 for 3 mm of latex) so the mask fits the cast.">?</span><input id="mask_gap_mm" data-set type="number" step="0.1" min="-10" max="5"></label>
             </div>
             <label class="check" for="mask_fine_edge"><input id="mask_fine_edge" data-set type="checkbox"> Thin edge round the openings <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="The mask tapers down to a fine edge round each opening, so the spray reaches right up to it and the paint line is crisp.">?</span></label>
+            <label class="check" for="mask_smooth"><input id="mask_smooth" data-set type="checkbox"> Smooth the surface <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="Smooths out the flat facets of a low-detail scan so they don't print into the mask.">?</span></label>
             <label class="check" for="maskShow"><input id="maskShow" type="checkbox" checked> Show the built mask</label>
             <button type="button" class="btn primary wide" id="maskBuild">Build paint mask</button>
             <div id="maskDone" hidden>
@@ -500,7 +510,7 @@
             <div class="group-body">
               <div class="seg" role="group" aria-label="Shell style" id="shellStyle">
                 <button type="button" data-style="BOX">Box</button>
-                <button type="button" data-style="CONTOUR">Hug the latex</button>
+                <button type="button" data-style="CONTOUR">Contour Shell</button>
               </div>
               <div class="fields">
                 <label for="wall_mm" data-box>Wall (mm)<input id="wall_mm" data-set type="number" step="0.05" min="1" max="50"></label>

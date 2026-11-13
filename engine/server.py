@@ -47,7 +47,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.16.1"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.16.2"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -90,6 +90,7 @@ DEFAULT_SETTINGS = {
     "mask_t_mm": 1.2,
     "mask_gap_mm": 0.1,
     "mask_fine_edge": True,
+    "mask_smooth": True,
 }
 SHELL_STYLES = ("BOX", "CONTOUR")
 
@@ -1269,38 +1270,56 @@ def job_save_model():
 
 
 def _mask_saved(latex):
-    """The paint mask area painted on this scan last time, if it still fits it."""
+    """The mask area chosen on this scan last time, if it still fits it."""
     m = _read_json(os.path.join(STATE["folder"], "paint_mask.json"), {}) or {}
+    if not m.get("field"):
+        return None
     try:
-        n = len(ms._world_tris(latex)[1])
+        _, n = paint_mask.screen_ids(*ms._world_tris(latex))
     except Exception:
         return None
-    return {"n": n, "ranges": m["ranges"]} if m.get("n") == n and m.get("ranges") else None
+    return {"nv": n, "field": m["field"]} if m.get("nv") == n else None
 
 
-def job_mask_save(n, ranges, name=None):
-    """Keep the painted area with the scan, so it comes back next time."""
+def job_mask_save(nv, field, name=None):
+    """Keep the chosen area with the scan, so it comes back next time."""
     folder = os.path.join(OUT_ROOT, safe_name(name)) if name else STATE["folder"]
     if not folder or not os.path.isdir(folder):
         return {}
     with open(os.path.join(folder, "paint_mask.json"), "w", encoding="utf-8") as f:
-        json.dump({"n": int(n), "ranges": ranges or []}, f)
+        json.dump({"nv": int(nv), "field": field or ""}, f)
     return {"saved": True}
 
 
-def job_paint_mask(n, ranges, settings):
-    """Build the paint mask from the painted area: saved as
+def job_mask_features(feature_mm=None):
+    """Raised bumps on the model (eyes, say) to make the openings from: each
+    with its signed distance field, in the screen's corner numbering."""
+    latex = _latex()
+    progress("Looking for raised features")
+    co, tris = ms._world_tris(latex)
+    sid, n = paint_mask.screen_ids(co, tris)
+    found = paint_mask.find_raised(co, tris, float(feature_mm) if feature_mm else None)
+    out = []
+    ok = sid >= 0
+    for f in found:
+        d = np.full(n, paint_mask.OUT, dtype=np.float32)
+        d[sid[ok]] = f["dist"][ok]
+        out.append({"center": [round(float(x), 2) for x in f["center"]], "normal": [round(float(x), 4) for x in f["normal"]],
+                    "width_mm": round(f["width_mm"], 1), "raised_mm": round(f["raised_mm"], 2), "dist": paint_mask.to_b64(d)})
+    return {"features": out, "nv": n}
+
+
+def job_paint_mask(nv, field_b64, settings):
+    """Build the paint mask from the chosen area: saved as
     "<name> - paint mask.stl" and ".3mf" (dome up, ready to slice) in the scan's folder."""
     latex = _latex()
     t0 = time.time()
     progress("Making the paint mask")
     co, tris = ms._world_tris(latex)
-    if int(n) != len(tris):
-        raise RuntimeError("The scan has changed since the mask was painted. Paint it again.")
-    sel = paint_mask.ranges_to_mask(ranges, len(tris))
-    V, F, info = paint_mask.build(co, tris, sel, thickness=float(settings["mask_t_mm"]), gap=float(settings["mask_gap_mm"]),
-                                  fine_edge=bool(settings.get("mask_fine_edge", True)))
-    job_mask_save(n, ranges)
+    field = paint_mask.field_from_b64(field_b64, co, tris)
+    V, F, info = paint_mask.build(co, tris, field, thickness=float(settings["mask_t_mm"]), gap=float(settings["mask_gap_mm"]),
+                                  fine_edge=bool(settings.get("mask_fine_edge", True)), smooth=bool(settings.get("mask_smooth", True)))
+    job_mask_save(nv, field_b64)
     progress("Saving the paint mask")
     folder, name = STATE["folder"], STATE["name"] + " - paint mask"
     M = paint_mask.print_pose(V, F)
@@ -1973,9 +1992,11 @@ class Handler(BaseHTTPRequestHandler):
                 settings.update({k: data.get("settings", {}).get(k, v) for k, v in settings.items()})
                 check_settings(settings)
                 save_settings(settings)
-                return self._send(200, self._busy(job_paint_mask, data["n"], data.get("ranges") or [], settings))
+                return self._send(200, self._busy(job_paint_mask, data["nv"], data.get("field") or "", settings))
             if p == "/api/paint_mask_save":
-                return self._send(200, job_mask_save(data["n"], data.get("ranges") or [], data.get("name")))
+                return self._send(200, job_mask_save(data["nv"], data.get("field") or "", data.get("name")))
+            if p == "/api/mask_features":
+                return self._send(200, self._busy(job_mask_features, data.get("feature_mm")))
             if p == "/api/autosplit":
                 settings = load_settings()
                 settings.update({k: data.get("settings", {}).get(k, v) for k, v in settings.items()})

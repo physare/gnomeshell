@@ -322,7 +322,7 @@ USE
          one has a range, and a number outside it is refused with a note.
          "Reset to the defaults" puts them back.
        - Shell style (Settings tab, Shell): Box is the solid box with
-         bungee channels. Hug the latex makes a shell that follows the
+         bungee channels. Contour Shell makes a shell that follows the
          latex instead, Thickness thick (4 mm by default), with a raised
          strip along each seam, a U notch at the strip tips every Notch
          spacing for the bungee cord to wrap round the whole mold, a flat
@@ -378,18 +378,30 @@ USE
      scan back.
      Paint mask (Mask tab, or press 5): a thin cover that fits over the
      piece with openings to spray through, say to paint the eyes white
-     after the whole piece is gray. Turn the view to face the area, draw
-     round it (an Ellipse, a Box or a Free line; Shift makes a circle or a
-     square) with Paint on, then pick Rub out and draw round each opening.
-     Whatever you can see inside the outline is painted or rubbed out; the
-     Brush touches up by hand. Ctrl+Z steps back. Build paint mask saves
-     "<scan> - paint mask.3mf" and .stl in the scan's folder, dome up and
-     ready to slice (it needs supports under the dome). Thickness is 1.2 mm
-     and the gap off the model 0.1 mm, so it fits snug; round the openings
-     it thins to a fine edge for a crisp paint line. Tape it on to spray.
-     If the scan is of the latex mold rather than the piece, set the gap
-     to minus the latex's thickness so the mask fits the cast. What you
-     paint is kept with the scan.
+     after the whole piece is gray. Turn the view to face the eyes and
+     press Find raised features: it finds the bumps that stand up from the
+     surface (eyes, ears, a snout), numbers them in the view and ticks the
+     two facing you most. Tick the ones to paint. The mask goes round them
+     out to Mask reaches (12 mm), with each opening Opening margin (0.5 mm)
+     past the feature's edge. Feature size sets how wide a bump to look for.
+     To draw it yourself, pick Ellipse, Box or Free line (Shift makes a
+     circle or a square), draw round the area with Add, then round each
+     opening with Subtract. Everything visible inside the outline changes,
+     and the edge lands exactly on the line you drew, however coarse the
+     scan. The Brush touches up by hand. With no tool picked, dragging
+     turns the view; click the picked tool again or press Esc to put it
+     down. Expand and Contract move the edge 1 mm. Ctrl+Z steps back, and
+     Clear mask starts over (it also takes the built mask out of the view).
+     Build paint mask saves "<scan> - paint mask.3mf" and .stl in the
+     scan's folder, dome up and ready to slice (it needs supports under the
+     dome). Thickness is 1.2 mm and the gap off the model 0.1 mm, so it fits
+     snug; round the openings it thins to a fine edge for a crisp paint
+     line, and Smooth the surface keeps a low-detail scan's flat facets out
+     of it. Tape it on to spray. If the scan is of the latex mold rather
+     than the piece, set the gap to minus the latex's thickness so the mask
+     fits the cast. The mask area is kept with the scan.
+     Esc, when there's nothing else for it to cancel, asks whether to close
+     GnomeShell.
      A scan with holes in it can't be built: press Repair mesh first. After
      a build, any piece that didn't come out closed is named in red.
 
