@@ -441,26 +441,26 @@
           </details>
 
           <div class="mask-pane" data-in="mask">
-            <div class="head-row h2help"><h2>Paint mask</h2><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="A thin cover that fits over the piece, with openings where the paint goes. Paint the area to cover, rub out the openings (the eyes, say), and build it. Tape it on and spray through the openings.">?</span></div>
-            <p class="muted small" id="maskIntro">Turn the view to face the area, draw round it (the face, say) with Paint on, then switch to Rub out and draw round each opening (the eyes). Whatever you can see inside the outline is painted or rubbed out. Alt-drag turns the view while drawing.</p>
+            <div class="head-row h2help"><h2>Paint mask</h2><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="A thin cover that fits over the piece, with openings where the paint goes. Select the area to cover, subtract the openings (the eyes, say), and build it. Tape it on and spray through the openings.">?</span></div>
+            <p class="muted small" id="maskIntro">Turn the view to face the area and draw round it (the face, say) with Add, then switch to Subtract and draw round each opening (the eyes). Everything visible inside the outline is added or subtracted. Alt-drag turns the view while drawing.</p>
             <div class="seg four" role="group" aria-label="Draw with" id="maskTool">
               <button type="button" data-tool="ellipse" class="on" title="Drag an ellipse round the area. Shift makes a circle. (O)">Ellipse</button>
               <button type="button" data-tool="box" title="Drag a box round the area. Shift makes a square. (X)">Box</button>
               <button type="button" data-tool="free" title="Draw a loop round the area by hand (F)">Free line</button>
-              <button type="button" data-tool="brush" title="Paint or rub out by dragging on the model, for touching up (U)">Brush</button>
+              <button type="button" data-tool="brush" title="Add or subtract by dragging on the model, for touching up (U)">Brush</button>
             </div>
-            <div class="seg" role="group" aria-label="Paint or rub out" id="maskBrush">
-              <button type="button" data-brush="add" class="on" title="Paint the area the mask covers (B)">Paint</button>
-              <button type="button" data-brush="erase" title="Rub out: makes an opening (E)">Rub out</button>
+            <div class="seg" role="group" aria-label="Add or subtract" id="maskBrush">
+              <button type="button" data-brush="add" class="on" title="Add to the area the mask covers (B)">Add</button>
+              <button type="button" data-brush="erase" title="Subtract from the mask: makes an opening (E)">Subtract</button>
             </div>
             <label class="slider" for="maskSize" id="maskSizeBox" hidden>Brush size<input id="maskSize" type="range" min="1" max="40" step="0.5" value="6"><span class="mono" id="maskSizeV">6 mm</span></label>
             <div class="btn-grid">
-              <button type="button" class="btn sm" id="maskFacing" title="Paints everything on the model that faces you now. Turn the view to face the side you want covered first.">Paint what faces me</button>
-              <button type="button" class="btn sm" id="maskInvert" title="Painted becomes bare and bare becomes painted">Swap painted and bare</button>
-              <button type="button" class="btn sm" id="maskGrow" title="Paints one more row of triangles all round the painted area">Grow</button>
-              <button type="button" class="btn sm" id="maskShrink" title="Takes one row of triangles off all round the painted area, openings included">Shrink</button>
+              <button type="button" class="btn sm" id="maskFacing" title="Selects everything on the model that faces you now. Turn the view to face the side you want covered first.">Select facing side</button>
+              <button type="button" class="btn sm" id="maskInvert" title="The selected area becomes unselected and the rest becomes selected">Invert selection</button>
+              <button type="button" class="btn sm" id="maskGrow" title="Adds one row of triangles all round the selected area">Expand</button>
+              <button type="button" class="btn sm" id="maskShrink" title="Removes one row of triangles all round the selected area, openings included">Contract</button>
             </div>
-            <button type="button" class="btn sm" id="maskClear">Rub it all out</button>
+            <button type="button" class="btn sm" id="maskClear" title="Clears the selection and removes the built mask from the view. Ctrl+Z brings the selection back.">Clear mask</button>
             <dl class="kv" id="maskKv"></dl>
             <div class="fields">
               <label for="mask_t_mm">Thickness (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="How thick the mask is. 1.2 is three lines on a 0.4 mm nozzle.">?</span><input id="mask_t_mm" data-set type="number" step="0.1" min="0.4" max="10"></label>

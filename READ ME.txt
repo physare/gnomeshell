@@ -380,16 +380,17 @@ USE
      piece with openings to spray through, say to paint the eyes white
      after the whole piece is gray. Turn the view to face the area, draw
      round it (an Ellipse, a Box or a Free line; Shift makes a circle or a
-     square) with Paint on, then pick Rub out and draw round each opening.
-     Whatever you can see inside the outline is painted or rubbed out; the
-     Brush touches up by hand. Ctrl+Z steps back. Build paint mask saves
+     square) with Add on, then pick Subtract and draw round each opening.
+     Everything visible inside the outline is added or subtracted; the
+     Brush touches up by hand. Ctrl+Z steps back, and Clear mask starts
+     over (it also takes the built mask out of the view). Build paint mask saves
      "<scan> - paint mask.3mf" and .stl in the scan's folder, dome up and
      ready to slice (it needs supports under the dome). Thickness is 1.2 mm
      and the gap off the model 0.1 mm, so it fits snug; round the openings
      it thins to a fine edge for a crisp paint line. Tape it on to spray.
      If the scan is of the latex mold rather than the piece, set the gap
-     to minus the latex's thickness so the mask fits the cast. What you
-     paint is kept with the scan.
+     to minus the latex's thickness so the mask fits the cast. The
+     selected area is kept with the scan.
      A scan with holes in it can't be built: press Repair mesh first. After
      a build, any piece that didn't come out closed is named in red.
 

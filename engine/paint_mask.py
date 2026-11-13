@@ -149,7 +149,7 @@ def build(co, tris, sel, thickness=1.2, gap=0.3, fine_edge=True, edge_mm=0.45):
     if len(sel) != len(tris):
         raise ValueError("The painted mask doesn't match this scan. Paint it again.")
     if not sel.any():
-        raise ValueError("Paint the area the mask should cover first.")
+        raise ValueError("Select the area the mask should cover first.")
     thickness, gap = float(thickness), float(gap)
     if not (0.2 <= thickness <= 20):
         raise ValueError("Mask thickness must be from 0.2 to 20 mm.")

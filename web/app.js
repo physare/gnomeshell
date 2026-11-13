@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.16.1"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.16.2"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -1576,7 +1576,7 @@ const KEYS = [
   ["H / Alt+H", "Hide the row picked in the Scene list / show everything"], ["X", "Overhangs in red on or off"], ["T", "Test slices on or off"],
   ["N", "Hide or show the side panel"], ["Ctrl+S", "Save this cut layout"], ["Ctrl+B", "Build the shell"],
   ["Ctrl+T", "New tab, to open another scan"], ["Ctrl+W", "Close this tab (it asks first)"], ["Ctrl+Tab / Ctrl+Shift+Tab", "Next tab / the one before"],
-  ["F", "Fit the view"], ["Numpad 1 / 3 / 7", "Front / side / top view"], ["Ctrl+Numpad 7", "From underneath"], ["1 / 2 / 3 / 4 / 5", "Scan / Cuts / Insert / Settings / Mask tab"], ["B / E", "Paint mask: paint / rub out"], ["O / X / F / U", "Paint mask: draw an ellipse / box / free line, or brush"], ["[ / ]", "Paint mask: smaller / bigger brush"], ["I", "Insert view, when the insert is on"], ["?", "Show these keys"],
+  ["F", "Fit the view"], ["Numpad 1 / 3 / 7", "Front / side / top view"], ["Ctrl+Numpad 7", "From underneath"], ["1 / 2 / 3 / 4 / 5", "Scan / Cuts / Insert / Settings / Mask tab"], ["B / E", "Paint mask: add / subtract"], ["O / X / F / U", "Paint mask: draw an ellipse / box / free line, or brush"], ["[ / ]", "Paint mask: smaller / bigger brush"], ["I", "Insert view, when the insert is on"], ["?", "Show these keys"],
 ];
 $("#keysList").innerHTML = KEYS.map(([k, v]) => `<dt class="mono">${k}</dt><dd>${v}</dd>`).join("");
 $("#keysBtn").onclick = () => { $("#keys").hidden = !$("#keys").hidden; };
@@ -3776,7 +3776,7 @@ $("#maskFacing").onclick = () => maskAll(() => {
   }
 });
 $("#maskInvert").onclick = () => maskAll(() => { for (let i = 0; i < MASK.sel.length; i++) MASK.sel[i] = MASK.sel[i] ? 0 : 1; });
-$("#maskClear").onclick = () => maskAll(() => MASK.sel.fill(0));
+$("#maskClear").onclick = () => { maskAll(() => MASK.sel.fill(0)); maskDropBuilt(); };
 function maskGrow(v) {
   const adj = maskAdj(), s = MASK.sel, next = s.slice();
   for (let i = 0; i < s.length; i++) {
@@ -3794,7 +3794,7 @@ function maskStats() {
   for (let i = 0; i < MASK.sel.length; i++) if (MASK.sel[i]) a += ar[i];
   const pct = 100 * a / latexTri.total;
   $("#tabMask").textContent = a > 0 ? `${pct < 1 ? pct.toFixed(1) : Math.round(pct)}%` : "";
-  kv.innerHTML = a > 0 ? `<dt>Painted</dt><dd>${(a / 100).toFixed(1)} cm² · ${pct.toFixed(pct < 10 ? 1 : 0)}% of the model</dd>` : "";
+  kv.innerHTML = a > 0 ? `<dt>Mask area</dt><dd>${(a / 100).toFixed(1)} cm² · ${pct.toFixed(pct < 10 ? 1 : 0)}% of the model</dd>` : "";
   $("#maskBuild").disabled = !(a > 0);
 }
 // the built mask in the view
@@ -3810,7 +3810,7 @@ $("#maskShow").onchange = maskVis;
 $("#maskBuild").onclick = () => {
   if (!MASK.sel || !S.scan) return;
   const ranges = maskRanges();
-  if (!ranges.length) { toast("Paint the area the mask should cover first."); return; }
+  if (!ranges.length) { toast("Select the area the mask should cover first."); return; }
   withBusy("Making the paint mask", async () => {
     const r = await api("/api/paint_mask", { n: MASK.n, ranges, settings: S.settings });
     const g = await loadSTL(r.url);
