@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.15.1"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.15.2"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -1817,12 +1817,14 @@ async function showScan(info, keepCuts, restore) {
   const tried = S.repairTried === info.name;
   $("#scanHealth").textContent = info.watertight ? "Mesh is closed and ready." : tried ?
     `Still ${info.open_edges} open edges after repair.` : `${info.open_edges} open edges.`;
-  $("#scanWarn").hidden = info.watertight;
+  $("#cleanWarn").hidden = !info.floor_share;
+  $("#scanWarn").hidden = info.watertight || !!info.floor_share; // cleaning up closes it too
   $("#scanWarnText").textContent = tried ?
     `Repair couldn't close every hole in this scan (${info.open_edges} open edges left). Fix it in your scan software, then load it again. The shell can't be built until then.` :
     `This scan has holes in its surface (${info.open_edges} open edges). The shell can't be carved around it properly until they're closed.`;
   $("#scanWarnFix").hidden = tried;
-  $$('[data-prep=repair]:not(#scanWarnFix)').forEach((b) => b.hidden = !info.watertight); // the warning has its own
+  $$('[data-prep=repair]:not(#scanWarnFix)').forEach((b) => b.hidden = !$("#scanWarn").hidden); // the warning has its own
+  $("#cleanBtn").hidden = !$("#cleanWarn").hidden;
   fillSize();
   const g = await loadSTL(info.stl_url);
   g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 3), 3));
@@ -1855,10 +1857,13 @@ async function showScan(info, keepCuts, restore) {
 $$("[data-prep]").forEach((b) => b.onclick = () => {
   const op = b.dataset.prep;
   const value = op === "trim_base" ? +$("#trimMm").value : op === "simplify" ? (+$("#simpPct").value) / 100 : undefined;
-  const label = { lay_flat: "Laying it flat", reset: "Reloading the scan", trim_base: "Trimming the base", repair: "Repairing the mesh", simplify: "Simplifying" }[op];
+  const label = { cleanup: "Cleaning up the scan", lay_flat: "Laying it flat", reset: "Reloading the scan", trim_base: "Trimming the base", repair: "Repairing the mesh", simplify: "Simplifying" }[op];
   withBusy(label, async () => {
     if (op === "repair") S.repairTried = S.scan?.name; else if (op === "reset") S.repairTried = null;
-    const info = await api("/api/prep", { op, value }); await showScan(info, op !== "reset" && op !== "lay_flat"); if (op === "lay_flat") viewFrom("fit");
+    const info = await api("/api/prep", { op, value }); await showScan(info, op !== "reset" && op !== "lay_flat" && op !== "cleanup"); if (op === "lay_flat" || op === "cleanup") viewFrom("fit");
+    if (op === "cleanup") {
+      toast(`${info.clean_note || "Cleaned up."}${info.watertight ? "" : " It still has a few holes: press Repair mesh."} Ctrl+Z puts it back.`, true);
+    }
     if (op === "repair" && info.watertight) toast(`${info.repair_note && info.repair_note !== "Nothing needed fixing." ? info.repair_note + " " : ""}The scan is closed and ready to build.`, true);
   });
 });

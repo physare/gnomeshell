@@ -609,3 +609,5 @@ body.no-panel .panel { display: none; }
 .pscan .ps-bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .pscan .ps-bar i { display: block; height: 100%; background: var(--latex); transition: width .4s; }
 .pscan .ps-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.clean-warn { border-color: #6b5a2e; background: #2f2a1c; color: #f1e3c0; }
+.clean-warn[hidden] { display: none; }

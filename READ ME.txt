@@ -354,6 +354,12 @@ USE
      as it would look poured, and after a build the shell view shows the
      holder and the silicone insert in place and the mold beside the shell.
      A part too big even on its own shows in red on a plate by itself.
+     Clean up scan (Scan tab): a phone or photo scan often comes back with
+     the floor or table it stood on, and other things that were round it.
+     Clean up finds the floor, cuts the scan just above it, takes away
+     everything not joined to the latex mold and closes it flat underneath.
+     When a scan comes in with a floor, a banner offers it. Ctrl+Z puts the
+     scan back.
      A scan with holes in it can't be built: press Repair mesh first. After
      a build, any piece that didn't come out closed is named in red.
 

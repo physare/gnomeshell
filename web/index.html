@@ -179,6 +179,10 @@
           <button type="button" role="tab" data-tab="settings" aria-selected="false" title="Shell, channels, test slice and printer (4)"><svg class="ti" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg>Settings<span class="n" id="tabSettings"></span></button>
         </div>
         <div class="scroll">
+          <div class="scan-warn clean-warn" id="cleanWarn" role="status" hidden>
+            <p>This scan still has the floor it was scanned on, and maybe other things that were round it. Clean up keeps just the latex mold, closed flat underneath.</p>
+            <button type="button" class="btn sm" data-prep="cleanup">Clean up scan</button>
+          </div>
           <div class="scan-warn" id="scanWarn" role="alert" hidden>
             <p id="scanWarnText"></p>
             <button type="button" class="btn sm" id="scanWarnFix" data-prep="repair">Repair mesh</button>
@@ -342,6 +346,7 @@
               </div>
               <div class="btn-grid">
                 <button type="button" class="btn" data-prep="repair">Repair mesh</button>
+                <button type="button" class="btn" data-prep="cleanup" id="cleanBtn" title="Take away the floor or table the scan was made on, and anything not joined to the latex mold, then close it flat underneath. Ctrl+Z puts it back.">Clean up scan</button>
               </div>
               <p class="muted small" id="scanHealth"></p>
             

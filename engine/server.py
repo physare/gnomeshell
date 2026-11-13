@@ -39,13 +39,14 @@ import web as gapweb  # noqa: E402
 import seam  # noqa: E402
 import photoscan  # noqa: E402
 import marker_sheet  # noqa: E402
+import cleanup as scanclean  # noqa: E402
 
 HOME_DOCS = os.path.join(os.path.expanduser("~"), "Documents")
 OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expanduser("~"), "Mold Shells")
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.15.1"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.15.2"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -388,6 +389,14 @@ def _job_load(stl_bytes, filename, resave=True, prepared=False, quick=False):
         info["grown"] = {"factor": grow, "was": float(f"{big:.3g}")}
     info["file"] = os.path.basename(filename or "scan.stl")
     info["prepared"] = bool(use_prep)
+    if not use_prep:  # a fresh scan that still has the floor it was scanned on: offer to clean it up
+        try:
+            co, tris = ms._world_tris(latex)
+            fl = scanclean.find_floor(co, tris)
+            if scanclean.is_floor(fl):
+                info["floor_share"] = round(float(fl[2]), 3)
+        except Exception:
+            traceback.print_exc()
     info["layouts"] = _read_json(os.path.join(folder, "layouts.json"), {}) or {}
     if not quick:
         progress("Finding the best cut")
@@ -1100,6 +1109,16 @@ def job_prep(op, value=None):
                 bpy.data.meshes.remove(old)
     elif op == "repair":
         STATE["repair_note"] = _repair(latex)
+    elif op == "cleanup":
+        r = scanclean.clean_scan(latex)
+        said = []
+        if r["floor"]:
+            said.append("Took away the floor it was scanned on and closed it flat underneath")
+        if r["bits"]:
+            said.append(f"removed {r['bits']} loose bit{'s' if r['bits'] != 1 else ''} round it")
+        if not said:
+            said.append("Found no floor or loose bits to take away")
+        STATE["clean_note"] = (", and ".join(said) + (f" ({round(100 * r['dropped'])}% of the scan's surface)." if r["dropped"] >= 0.005 else "."))
     elif op == "simplify":
         ratio = max(0.05, min(1.0, float(value)))
         m = latex.modifiers.new("simplify", "DECIMATE")
@@ -1130,6 +1149,10 @@ def job_prep(op, value=None):
     _scan_push(snap)
     if op == "repair":
         info["repair_note"] = STATE.pop("repair_note", "")
+    if op == "cleanup":
+        info["clean_note"] = STATE.pop("clean_note", "")
+        progress("Finding the best cut")
+        info["suggested"] = job_suggest(load_settings().get("max_tilt_deg", 30))  # a first cut for the new shape
     return info
 
 
