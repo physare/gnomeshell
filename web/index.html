@@ -192,6 +192,7 @@
           <button type="button" role="tab" data-tab="scan" aria-selected="false" title="Size and prepare the scan (1)"><svg class="ti" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>Scan<span class="n" id="tabScan"></span></button>
           <button type="button" role="tab" data-tab="cuts" aria-selected="true" title="Cuts, pieces and saved layouts (2)"><svg class="ti" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12"/></svg>Cuts<span class="n" id="tabCuts"></span></button>
           <button type="button" role="tab" data-tab="insert" aria-selected="false" title="Silicone insert (3)"><svg class="ti" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 8h16v11H4z"/><path d="M8 8V5h8v3M12 12v4"/></svg>Insert<span class="n" id="tabInsert"></span></button>
+          <button type="button" role="tab" data-tab="mask" aria-selected="false" title="Paint mask: a cover to spray through (5)"><svg class="ti" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12c0-5 4-8 9-8s9 3 9 8-4 8-9 8-9-3-9-8z"/><circle cx="8.5" cy="11" r="2"/><circle cx="15.5" cy="11" r="2"/></svg>Mask<span class="n" id="tabMask"></span></button>
           <button type="button" role="tab" data-tab="settings" aria-selected="false" title="Shell, channels, test slice and printer (4)"><svg class="ti" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg>Settings<span class="n" id="tabSettings"></span></button>
         </div>
         <div class="scroll">
@@ -438,6 +439,44 @@
               </div>
             </div>
           </details>
+
+          <div class="mask-pane" data-in="mask">
+            <div class="head-row h2help"><h2>Paint mask</h2><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="A thin cover that fits over the piece, with openings where the paint goes. Paint the area to cover, rub out the openings (the eyes, say), and build it. Tape it on and spray through the openings.">?</span></div>
+            <p class="muted small" id="maskIntro">Turn the view to face the area, draw round it (the face, say) with Paint on, then switch to Rub out and draw round each opening (the eyes). Whatever you can see inside the outline is painted or rubbed out. Alt-drag turns the view while drawing.</p>
+            <div class="seg four" role="group" aria-label="Draw with" id="maskTool">
+              <button type="button" data-tool="ellipse" class="on" title="Drag an ellipse round the area. Shift makes a circle. (O)">Ellipse</button>
+              <button type="button" data-tool="box" title="Drag a box round the area. Shift makes a square. (X)">Box</button>
+              <button type="button" data-tool="free" title="Draw a loop round the area by hand (F)">Free line</button>
+              <button type="button" data-tool="brush" title="Paint or rub out by dragging on the model, for touching up (U)">Brush</button>
+            </div>
+            <div class="seg" role="group" aria-label="Paint or rub out" id="maskBrush">
+              <button type="button" data-brush="add" class="on" title="Paint the area the mask covers (B)">Paint</button>
+              <button type="button" data-brush="erase" title="Rub out: makes an opening (E)">Rub out</button>
+            </div>
+            <label class="slider" for="maskSize" id="maskSizeBox" hidden>Brush size<input id="maskSize" type="range" min="1" max="40" step="0.5" value="6"><span class="mono" id="maskSizeV">6 mm</span></label>
+            <div class="btn-grid">
+              <button type="button" class="btn sm" id="maskFacing" title="Paints everything on the model that faces you now. Turn the view to face the side you want covered first.">Paint what faces me</button>
+              <button type="button" class="btn sm" id="maskInvert" title="Painted becomes bare and bare becomes painted">Swap painted and bare</button>
+              <button type="button" class="btn sm" id="maskGrow" title="Paints one more row of triangles all round the painted area">Grow</button>
+              <button type="button" class="btn sm" id="maskShrink" title="Takes one row of triangles off all round the painted area, openings included">Shrink</button>
+            </div>
+            <button type="button" class="btn sm" id="maskClear">Rub it all out</button>
+            <dl class="kv" id="maskKv"></dl>
+            <div class="fields">
+              <label for="mask_t_mm">Thickness (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="How thick the mask is. 1.2 is three lines on a 0.4 mm nozzle.">?</span><input id="mask_t_mm" data-set type="number" step="0.1" min="0.4" max="10"></label>
+              <label for="mask_gap_mm">Gap (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="How far the mask sits off the model, so it doesn't rub the paint. 0.1 is snug without rubbing. If this scan is of the latex mold and not the piece itself, set it to minus the latex's thickness (say -2.7 for 3 mm of latex) so the mask fits the cast.">?</span><input id="mask_gap_mm" data-set type="number" step="0.1" min="-10" max="5"></label>
+            </div>
+            <label class="check" for="mask_fine_edge"><input id="mask_fine_edge" data-set type="checkbox"> Thin edge round the openings <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="The mask tapers down to a fine edge round each opening, so the spray reaches right up to it and the paint line is crisp.">?</span></label>
+            <label class="check" for="maskShow"><input id="maskShow" type="checkbox" checked> Show the built mask</label>
+            <button type="button" class="btn primary wide" id="maskBuild">Build paint mask</button>
+            <div id="maskDone" hidden>
+              <dl class="kv" id="maskDoneKv"></dl>
+              <div class="btn-grid">
+                <button type="button" class="btn sm" id="maskOpen" title="Opens the paint mask's 3MF, turned dome up and ready to slice">Open in Bambu Studio</button>
+                <button type="button" class="btn sm" id="maskFolder">Show folder</button>
+              </div>
+            </div>
+          </div>
 
           <h2 class="settings-head" data-in="settings">Settings</h2>
           <div class="units-row" data-in="settings">

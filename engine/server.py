@@ -40,13 +40,14 @@ import seam  # noqa: E402
 import photoscan  # noqa: E402
 import marker_sheet  # noqa: E402
 import cleanup as scanclean  # noqa: E402
+import paint_mask  # noqa: E402
 
 HOME_DOCS = os.path.join(os.path.expanduser("~"), "Documents")
 OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expanduser("~"), "Mold Shells")
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.16.0"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.16.1"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -86,6 +87,9 @@ DEFAULT_SETTINGS = {
     "notch_gap_mm": ms.DEFAULTS["notch_gap_mm"],
     "foot_mm": ms.DEFAULTS["foot_mm"],
     "bump_r_mm": ms.DEFAULTS["bump_r_mm"],
+    "mask_t_mm": 1.2,
+    "mask_gap_mm": 0.1,
+    "mask_fine_edge": True,
 }
 SHELL_STYLES = ("BOX", "CONTOUR")
 
@@ -105,6 +109,8 @@ LIMITS = {
     "peg_len_mm": ("Peg length", 3, 60, False),
     "peg_clear_mm": ("Peg clearance", 0, 2, False),
     "seam_t_mm": ("Seam card thickness", 0.1, 5, False),
+    "mask_t_mm": ("Paint mask thickness", 0.4, 10, False),
+    "mask_gap_mm": ("Paint mask gap", -10, 5, False),
     "seam_w_mm": ("Seam card sticks out", 5, 300, False),
     "seam_gap_mm": ("Seam card gap", 0, 5, False),
     "seam_rim_w_mm": ("Stiff edge width", 0, 100, False),
@@ -419,6 +425,7 @@ def _job_load(stl_bytes, filename, resave=True, prepared=False, quick=False):
         except Exception:
             traceback.print_exc()
     info["layouts"] = _read_json(os.path.join(folder, "layouts.json"), {}) or {}
+    info["paint_mask"] = _mask_saved(latex)
     if not quick:
         progress("Finding the best cut")
         info["suggested"] = job_suggest(load_settings().get("max_tilt_deg", 30))
@@ -1261,6 +1268,56 @@ def job_save_model():
     return {"path": path, "file": os.path.basename(path)}
 
 
+def _mask_saved(latex):
+    """The paint mask area painted on this scan last time, if it still fits it."""
+    m = _read_json(os.path.join(STATE["folder"], "paint_mask.json"), {}) or {}
+    try:
+        n = len(ms._world_tris(latex)[1])
+    except Exception:
+        return None
+    return {"n": n, "ranges": m["ranges"]} if m.get("n") == n and m.get("ranges") else None
+
+
+def job_mask_save(n, ranges, name=None):
+    """Keep the painted area with the scan, so it comes back next time."""
+    folder = os.path.join(OUT_ROOT, safe_name(name)) if name else STATE["folder"]
+    if not folder or not os.path.isdir(folder):
+        return {}
+    with open(os.path.join(folder, "paint_mask.json"), "w", encoding="utf-8") as f:
+        json.dump({"n": int(n), "ranges": ranges or []}, f)
+    return {"saved": True}
+
+
+def job_paint_mask(n, ranges, settings):
+    """Build the paint mask from the painted area: saved as
+    "<name> - paint mask.stl" and ".3mf" (dome up, ready to slice) in the scan's folder."""
+    latex = _latex()
+    t0 = time.time()
+    progress("Making the paint mask")
+    co, tris = ms._world_tris(latex)
+    if int(n) != len(tris):
+        raise RuntimeError("The scan has changed since the mask was painted. Paint it again.")
+    sel = paint_mask.ranges_to_mask(ranges, len(tris))
+    V, F, info = paint_mask.build(co, tris, sel, thickness=float(settings["mask_t_mm"]), gap=float(settings["mask_gap_mm"]),
+                                  fine_edge=bool(settings.get("mask_fine_edge", True)))
+    job_mask_save(n, ranges)
+    progress("Saving the paint mask")
+    folder, name = STATE["folder"], STATE["name"] + " - paint mask"
+    M = paint_mask.print_pose(V, F)
+    P = V @ M[:3, :3].T + M[:3, 3]
+    ms._write_stl(os.path.join(folder, name + ".stl"), P, F)
+    ms.write_3mf(os.path.join(folder, name + ".3mf"), [("Paint mask", P, F)], settings["bed_mm"], arrange=True)
+    ms._write_stl(os.path.join(PREVIEW_DIR, "MASK.stl"), V, F)
+    STATE["mask_rev"] = STATE.get("mask_rev", 0) + 1
+    progress("Done")
+    dims = P.max(0) - P.min(0)
+    info.update(files=[{"name": name + ".3mf", "size": os.path.getsize(os.path.join(folder, name + ".3mf"))},
+                       {"name": name + ".stl", "size": os.path.getsize(os.path.join(folder, name + ".stl"))}],
+                print_mm=[round(float(x), 1) for x in dims], fits_plate=bool(max(dims[:2]) <= float(settings["bed_mm"])),
+                url=f"/api/preview/MASK.stl?rev={STATE['mask_rev']}", seconds=round(time.time() - t0, 1))
+    return info
+
+
 def _printer(settings):
     return (float(settings["bed_mm"]), float(settings.get("bed_d_mm") or settings["bed_mm"]), float(settings["bed_h_mm"]))
 
@@ -1911,6 +1968,14 @@ class Handler(BaseHTTPRequestHandler):
                 settings = load_settings()
                 settings.update({k: data.get("settings", {}).get(k, v) for k, v in settings.items()})
                 return self._send(200, self._busy(job_insert_only, data["insert"], data.get("cuts") or [], settings, data.get("frame")))
+            if p == "/api/paint_mask":
+                settings = load_settings()
+                settings.update({k: data.get("settings", {}).get(k, v) for k, v in settings.items()})
+                check_settings(settings)
+                save_settings(settings)
+                return self._send(200, self._busy(job_paint_mask, data["n"], data.get("ranges") or [], settings))
+            if p == "/api/paint_mask_save":
+                return self._send(200, job_mask_save(data["n"], data.get("ranges") or [], data.get("name")))
             if p == "/api/autosplit":
                 settings = load_settings()
                 settings.update({k: data.get("settings", {}).get(k, v) for k, v in settings.items()})
@@ -1929,7 +1994,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, self._phone(p, data))
             if p == "/api/open":
                 folder = os.path.join(OUT_ROOT, safe_name(data["name"])) if data.get("name") else STATE["folder"] or OUT_ROOT  # name: a tab's scan
-                target = os.path.join(folder, "shell.3mf") if data.get("what") == "bambu" else \
+                target = os.path.join(folder, os.path.basename(folder) + " - paint mask.3mf") if data.get("what") == "mask" else \
+                    os.path.join(folder, "shell.3mf") if data.get("what") == "bambu" else \
                     os.path.join(folder, "test_slices.3mf") if data.get("what") == "slices" else folder
                 if hasattr(os, "startfile"):
                     os.startfile(target)  # Windows: opens with the program set for .3mf, or Explorer

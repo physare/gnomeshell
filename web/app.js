@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.16.0"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.16.1"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -80,7 +80,7 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(300, -40
 const fill = new THREE.DirectionalLight(0xffffff, 0.6); fill.position.set(-400, 300, 200); scene.add(fill);
 const grid = new THREE.GridHelper(400, 40, 0x3a4045, 0x2a2f33); grid.rotation.x = Math.PI / 2; scene.add(grid);
 
-const groups = { latex: new THREE.Group(), planes: new THREE.Group(), regions: new THREE.Group(), arrows: new THREE.Group(), pour: new THREE.Group(), pieces: new THREE.Group(), slices: new THREE.Group(), plates: new THREE.Group(), slicePlan: new THREE.Group(), insert: new THREE.Group(), sizer: new THREE.Group(), base: new THREE.Group(), printer: new THREE.Group(), spout: new THREE.Group(), seam: new THREE.Group(), web: new THREE.Group() };
+const groups = { latex: new THREE.Group(), planes: new THREE.Group(), regions: new THREE.Group(), arrows: new THREE.Group(), pour: new THREE.Group(), pieces: new THREE.Group(), slices: new THREE.Group(), plates: new THREE.Group(), slicePlan: new THREE.Group(), insert: new THREE.Group(), sizer: new THREE.Group(), base: new THREE.Group(), printer: new THREE.Group(), spout: new THREE.Group(), seam: new THREE.Group(), web: new THREE.Group(), mask: new THREE.Group() };
 Object.values(groups).forEach((g) => scene.add(g));
 const handle = new THREE.Object3D(); scene.add(handle);
 // The open cut gets both at once: an arrow along its normal slides it, two
@@ -359,7 +359,7 @@ function refresh(o = {}) {
 }
 // the Scan tab is about the model itself: the shell's cuts, pieces, arrows and slice line wait on the Cuts tab
 function scanTabQuiet() {
-  const quiet = curTab() === "scan" && S.step === "cut";
+  const quiet = (curTab() === "scan" || curTab() === "mask") && S.step === "cut";
   labelBox.hidden = quiet;
   if (!quiet) return;
   groups.planes.visible = groups.regions.visible = groups.arrows.visible = groups.slicePlan.visible = false;
@@ -370,6 +370,7 @@ function refreshSoon(o) { if (rafT) return; rafT = requestAnimationFrame(() => {
 
 function paint(T) {
   const colors = latexMesh.geometry.attributes.color.array;
+  if (S.step === "cut" && curTab() === "mask" && !insViewOn()) { maskPaintAll(); return; }
   const parts = S.step === "cut" && curTab() === "scan" && !insViewOn() ? splitPartOf() : null;
   if (parts) {
     const pc = PIECE_COLORS.map((h) => new THREE.Color(h).lerp(COL.latex, 0.2));
@@ -1335,7 +1336,7 @@ function setMode(m) {
 let drag = null, down = null, hoverT = null;
 canvas.addEventListener("pointerdown", (e) => {
   down = null; closeMenu();
-  if (SEAM.picking || WEB.picking || SPOUT.picking || splitHandleAt(e)) return; // their own click handlers deal with it
+  if (SEAM.picking || WEB.picking || SPOUT.picking || splitHandleAt(e) || maskTab()) return; // their own click handlers deal with it
   const sh = e.button === 0 && S.step === "cut" ? sizerAt(e) : null;
   if (sh) { sizerStart(e, sh); e.stopImmediatePropagation(); return; }
   const ih = e.button === 0 && S.step === "cut" ? insHandleAt(e) : null;
@@ -1357,6 +1358,7 @@ canvas.addEventListener("pointerdown", (e) => {
   down = { x: e.clientX, y: e.clientY, button: 0 };
 }, true);
 canvas.addEventListener("pointermove", (e) => {
+  if (maskTab()) return; // the paint mask brush has its own
   if (cutLine) { cutLineMove(e); return; }
   if (sizeDrag) { sizerMove(e); return; }
   if (insDrag) { insDragMove(e); return; }
@@ -1383,6 +1385,7 @@ canvas.addEventListener("pointermove", (e) => {
 });
 canvas.addEventListener("pointerleave", () => { if (S.hover) { S.hover = null; highlight(); canvas.style.cursor = ""; } });
 canvas.addEventListener("pointerup", (e) => {
+  if (maskTab() || MASK.stroke) return;
   if (cutLine) { cutLineEnd(e); return; }
   if (sizeDrag) { sizerEnd(e); return; }
   if (insDrag) { insDragEnd(e); return; }
@@ -1573,7 +1576,7 @@ const KEYS = [
   ["H / Alt+H", "Hide the row picked in the Scene list / show everything"], ["X", "Overhangs in red on or off"], ["T", "Test slices on or off"],
   ["N", "Hide or show the side panel"], ["Ctrl+S", "Save this cut layout"], ["Ctrl+B", "Build the shell"],
   ["Ctrl+T", "New tab, to open another scan"], ["Ctrl+W", "Close this tab (it asks first)"], ["Ctrl+Tab / Ctrl+Shift+Tab", "Next tab / the one before"],
-  ["F", "Fit the view"], ["Numpad 1 / 3 / 7", "Front / side / top view"], ["Ctrl+Numpad 7", "From underneath"], ["1 / 2 / 3 / 4", "Scan / Cuts / Insert / Settings tab"], ["I", "Insert view, when the insert is on"], ["?", "Show these keys"],
+  ["F", "Fit the view"], ["Numpad 1 / 3 / 7", "Front / side / top view"], ["Ctrl+Numpad 7", "From underneath"], ["1 / 2 / 3 / 4 / 5", "Scan / Cuts / Insert / Settings / Mask tab"], ["B / E", "Paint mask: paint / rub out"], ["O / X / F / U", "Paint mask: draw an ellipse / box / free line, or brush"], ["[ / ]", "Paint mask: smaller / bigger brush"], ["I", "Insert view, when the insert is on"], ["?", "Show these keys"],
 ];
 $("#keysList").innerHTML = KEYS.map(([k, v]) => `<dt class="mono">${k}</dt><dd>${v}</dd>`).join("");
 $("#keysBtn").onclick = () => { $("#keys").hidden = !$("#keys").hidden; };
@@ -1592,6 +1595,7 @@ addEventListener("keydown", (e) => {
   if (mod && (k === "z" || k === "y")) {
     if (typing) return;
     e.preventDefault();
+    if (curTab() === "mask") { if (k === "y" || e.shiftKey) maskRedo(); else maskUndo(); return; }
     if (k === "y" || e.shiftKey) redo(); else undo();
     return;
   }
@@ -1615,7 +1619,8 @@ addEventListener("keydown", (e) => {
     else if (S.active != null) deleteCuts([S.active]);
     return;
   }
-  const tabKey = { Digit1: "scan", Digit2: "cuts", Digit3: "insert", Digit4: "settings" }[e.code];
+  const tabKey = { Digit1: "scan", Digit2: "cuts", Digit3: "insert", Digit4: "settings", Digit5: "mask" }[e.code];
+  if (curTab() === "mask" && maskKey(e)) { e.preventDefault(); return; }
   if (tabKey) { e.preventDefault(); showTab(tabKey); return; }
   const act = {
     p: () => setMode("pieces"), l: () => setMode("lines"), d: () => setMode("draw"),
@@ -1834,6 +1839,7 @@ async function showScan(info, keepCuts, restore, quiet) {
   groups.latex.add(latexMesh);
   latexTri = prepTriangles(g);
   latexBins = binFaces(latexTri);
+  maskNewMesh(info);
   pullCache = {};
   grid.position.set(0, 0, 0);
   if (!keepCuts) {
@@ -2097,14 +2103,14 @@ canvas.addEventListener("pointerdown", (e) => {
   orbit.enabled = false; canvas.setPointerCapture(e.pointerId);
 }, true);
 canvas.addEventListener("pointermove", (e) => {
-  if (!shapeDraw) return;
+  if (!shapeDraw || shapeDraw.mask) return;
   e.stopImmediatePropagation();
   const r = canvas.getBoundingClientRect();
   shapeDraw.pts.push([e.clientX - r.left, e.clientY - r.top]);
   drawOverlay();
 }, true);
 canvas.addEventListener("pointerup", (e) => {
-  if (!shapeDraw) return;
+  if (!shapeDraw || shapeDraw.mask) return;
   e.stopImmediatePropagation();
   orbit.enabled = true;
   finishShape();
@@ -2811,7 +2817,8 @@ function showTab(t) {
   $$("#ptabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
   sc.scrollTop = tabScroll[t] || 0;
   drawSizer();
-  if (S.T && (t === "scan" || was === "scan")) refresh({ keepHandle: true });
+  if (S.T && (t === "scan" || was === "scan" || t === "mask" || was === "mask")) refresh({ keepHandle: true });
+  maskVis();
 }
 $$("#ptabs [data-tab]").forEach((b) => b.onclick = () => showTab(b.dataset.tab));
 function paintTabs() {
@@ -2855,6 +2862,7 @@ function go(step) {
   });
   if (latexMesh) { latexMesh.material.transparent = step === "done"; latexMesh.material.opacity = step === "done" ? 0.9 : 1; latexMesh.material.depthWrite = true; latexMesh.material.needsUpdate = true; }
   applyInsView();
+  maskVis();
 }
 $$(".step").forEach((b) => b.onclick = () => go(b.dataset.step));
 $("#drop").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#fileInput").click(); } });
@@ -3521,6 +3529,308 @@ async function startTabs() {
   await switchTab(first.key);
   pollBuilds();
 }
+// ------------------------------------------------------------ paint mask
+// Paint the area a mask should cover straight onto the model, rub out the
+// openings, and the engine builds a thin cover that fits over the piece with
+// those openings to spray through. The painted area is one flag per triangle
+// of the model, the same triangles the engine has, so it goes over as runs of
+// triangle numbers.
+const MASK = { sel: null, n: 0, adj: null, stamp: null, tick: 0, brush: "add", tool: "ellipse", size: 6, stroke: null, undo: [], redo: [], mesh: null, saveT: 0, info: null };
+const MASK_ON = new THREE.Color("#4f86c6");
+const maskEsc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[c]);
+const maskTab = () => !!(S.step === "cut" && S.scan && latexMesh && latexTri && MASK.sel && curTab() === "mask" && !insViewOn() && !busyNow());
+// a new model in the view: keep what was painted if it's the same triangles (turned or sized), else what was saved with the scan
+function maskNewMesh(info) {
+  const n = latexTri.n, name = info?.name || null;
+  const keep = MASK.sel && MASK.n === n && MASK.name === name ? MASK.sel : null; // the same scan, turned or sized
+  MASK.sel = keep || new Uint8Array(n); MASK.n = n; MASK.name = name; MASK.adj = null; MASK.stamp = new Uint32Array(n); MASK.tick = 0;
+  if (!keep) {
+    MASK.undo = []; MASK.redo = [];
+    const saved = info && info.paint_mask;
+    if (saved && saved.n === n) for (const [a, k] of saved.ranges) MASK.sel.fill(1, a, a + k);
+  }
+  maskDropBuilt();
+  maskStats();
+}
+function maskRanges(s = MASK.sel) {
+  const out = [];
+  for (let i = 0; i < s.length;) {
+    if (!s[i]) { i++; continue; }
+    let j = i; while (j < s.length && s[j]) j++;
+    out.push([i, j - i]); i = j;
+  }
+  return out;
+}
+// which triangle meets which across each edge (built the first time it's needed)
+function maskAdj() {
+  if (MASK.adj) return MASK.adj;
+  const p = latexPos(), n = latexTri.n, ids = new Map(), vid = new Int32Array(n * 3);
+  for (let i = 0; i < n * 3; i++) {
+    const k = p[i * 3] + "," + p[i * 3 + 1] + "," + p[i * 3 + 2];
+    let v = ids.get(k); if (v === undefined) { v = ids.size; ids.set(k, v); } vid[i] = v;
+  }
+  const nv = ids.size, edges = new Map(), adj = new Int32Array(n * 3).fill(-1);
+  for (let i = 0; i < n; i++) for (let j = 0; j < 3; j++) {
+    const a = vid[i * 3 + j], b = vid[i * 3 + (j + 1) % 3], key = a < b ? a * nv + b : b * nv + a;
+    const o = edges.get(key);
+    if (o === undefined) edges.set(key, i * 3 + j);
+    else { adj[i * 3 + j] = (o / 3) | 0; if (adj[o] < 0) adj[o] = i; }
+  }
+  MASK.adj = adj;
+  return adj;
+}
+function maskColor(i) {
+  const c = latexMesh.geometry.attributes.color.array, col = MASK.sel[i] ? MASK_ON : COL.latex;
+  c[i * 9] = c[i * 9 + 3] = c[i * 9 + 6] = col.r;
+  c[i * 9 + 1] = c[i * 9 + 4] = c[i * 9 + 7] = col.g;
+  c[i * 9 + 2] = c[i * 9 + 5] = c[i * 9 + 8] = col.b;
+}
+function maskPaintAll() {
+  if (!MASK.sel || MASK.n !== latexTri.n) return;
+  for (let i = 0; i < latexTri.n; i++) maskColor(i);
+  latexMesh.geometry.attributes.color.needsUpdate = true;
+}
+// one dab of the brush: every triangle joined to the one under the pointer
+// within the brush's reach (so it never jumps through to a leg behind)
+function maskDab(P, f) {
+  const adj = maskAdj(), cen = latexTri.cen, r2 = MASK.size * MASK.size, v = MASK.brush === "add" ? 1 : 0;
+  const stamp = MASK.stamp, t = ++MASK.tick, stack = [f];
+  stamp[f] = t;
+  let changed = false;
+  while (stack.length) {
+    const i = stack.pop();
+    const dx = cen[i * 3] - P.x, dy = cen[i * 3 + 1] - P.y, dz = cen[i * 3 + 2] - P.z;
+    if (i !== f && dx * dx + dy * dy + dz * dz > r2) continue;
+    if (MASK.sel[i] !== v) { MASK.sel[i] = v; maskColor(i); changed = true; }
+    for (let j = 0; j < 3; j++) { const k = adj[i * 3 + j]; if (k >= 0 && stamp[k] !== t) { stamp[k] = t; stack.push(k); } }
+  }
+  if (changed) latexMesh.geometry.attributes.color.needsUpdate = true;
+}
+function maskHit(xy) {
+  const r = canvas.getBoundingClientRect();
+  ray.setFromCamera(new THREE.Vector2(xy[0] / r.width * 2 - 1, -(xy[1] / r.height) * 2 + 1), camera);
+  const h = ray.intersectObject(latexMesh, false)[0];
+  return h && h.faceIndex != null ? h : null;
+}
+function maskMark() {
+  MASK.undo.push(MASK.sel.slice()); if (MASK.undo.length > 30) MASK.undo.shift();
+  MASK.redo = [];
+}
+function maskChanged() {
+  maskStats();
+  clearTimeout(MASK.saveT);
+  const n = MASK.n, name = MASK.name, sel = MASK.sel;
+  // saved to this scan's own folder, even if another tab is open by then
+  MASK.saveT = setTimeout(() => { if (name) api("/api/paint_mask_save", { n, name, ranges: maskRanges(sel) }).catch(() => {}); }, 1500);
+}
+function maskUndo() { if (!MASK.undo.length) return; MASK.redo.push(MASK.sel); MASK.sel = MASK.undo.pop(); maskPaintAll(); maskChanged(); }
+function maskRedo() { if (!MASK.redo.length) return; MASK.undo.push(MASK.sel); MASK.sel = MASK.redo.pop(); maskPaintAll(); maskChanged(); }
+// the brush's ring on the view, sized to the brush where it touches the model
+function maskRing(xy, hit) {
+  let el = $("#brushRing");
+  if (!el) { el = document.createElement("div"); el.id = "brushRing"; canvas.parentElement.appendChild(el); }
+  if (!hit) { el.hidden = true; return; }
+  const r = canvas.getBoundingClientRect(), d = hit.point.distanceTo(camera.position);
+  const px = MASK.size / (d * Math.tan(camera.fov * Math.PI / 360)) * (r.height / 2);
+  el.hidden = false; el.classList.toggle("erase", MASK.brush === "erase");
+  el.style.width = el.style.height = 2 * px + "px";
+  el.style.left = (r.left - canvas.parentElement.getBoundingClientRect().left + xy[0]) + "px";
+  el.style.top = (r.top - canvas.parentElement.getBoundingClientRect().top + xy[1]) + "px";
+}
+canvas.addEventListener("pointerdown", (e) => {
+  if (!maskTab() || e.button !== 0 || e.altKey) return;
+  if (MASK.tool !== "brush") { // draw an outline round the area, on or off the model
+    e.stopImmediatePropagation(); e.preventDefault();
+    shapeDraw = { kind: MASK.tool, pts: [screenXY(e)], mask: true };
+    orbit.enabled = false; canvas.setPointerCapture(e.pointerId);
+    return;
+  }
+  const xy = screenXY(e), hit = maskHit(xy);
+  if (!hit) return; // beside the model: turn the view as usual
+  e.stopImmediatePropagation(); e.preventDefault();
+  orbit.enabled = false; canvas.setPointerCapture(e.pointerId);
+  maskMark();
+  MASK.stroke = { xy };
+  maskDab(hit.point, hit.faceIndex);
+  maskRing(xy, hit);
+}, true);
+canvas.addEventListener("pointermove", (e) => {
+  if (shapeDraw && shapeDraw.mask) {
+    let p = screenXY(e);
+    if (e.shiftKey && shapeDraw.kind !== "free") { // Shift: a circle or a square
+      const a = shapeDraw.pts[0], d = Math.max(Math.abs(p[0] - a[0]), Math.abs(p[1] - a[1]));
+      p = [a[0] + Math.sign(p[0] - a[0] || 1) * d, a[1] + Math.sign(p[1] - a[1] || 1) * d];
+    }
+    shapeDraw.pts.push(p); drawOverlay(); return;
+  }
+  if (MASK.tool !== "brush") { if ($("#brushRing")) $("#brushRing").hidden = true; return; }
+  if (!MASK.stroke) { if (maskTab() && !e.buttons) maskRing(screenXY(e), maskHit(screenXY(e))); else if ($("#brushRing")) $("#brushRing").hidden = true; return; }
+  const xy = screenXY(e), a = MASK.stroke.xy;
+  // fill in between pointer events, so a quick stroke leaves no gaps
+  const ringPx = parseFloat($("#brushRing")?.style.width || "20") / 2;
+  const steps = Math.max(1, Math.ceil(Math.hypot(xy[0] - a[0], xy[1] - a[1]) / Math.max(2, ringPx * 0.5)));
+  let last = null;
+  for (let s = 1; s <= steps; s++) {
+    const p = [a[0] + (xy[0] - a[0]) * s / steps, a[1] + (xy[1] - a[1]) * s / steps], hit = maskHit(p);
+    if (hit) { maskDab(hit.point, hit.faceIndex); last = hit; }
+  }
+  MASK.stroke.xy = xy;
+  maskRing(xy, last);
+}, true);
+function maskStrokeEnd(e) {
+  if (shapeDraw && shapeDraw.mask) { orbit.enabled = true; canvas.releasePointerCapture?.(e.pointerId); maskShapeEnd(); return; }
+  if (!MASK.stroke) return;
+  MASK.stroke = null; orbit.enabled = true; canvas.releasePointerCapture?.(e.pointerId);
+  maskChanged();
+}
+canvas.addEventListener("pointerup", maskStrokeEnd, true);
+canvas.addEventListener("pointercancel", maskStrokeEnd, true);
+canvas.addEventListener("pointerleave", () => { if (!MASK.stroke && $("#brushRing")) $("#brushRing").hidden = true; });
+// the outline drawn on the view: everything on the model inside it that you can
+// see (facing you, and not hidden behind another part) is painted or rubbed out
+function maskShapeEnd() {
+  let P = shapeOutline(); const kind = shapeDraw.kind;
+  shapeDraw = null; drawOverlay();
+  if (!P || P.length < 3) return;
+  const xs = P.map((q) => q[0]), ys = P.map((q) => q[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (x1 - x0 < 6 || y1 - y0 < 6) return toast("That shape is too small. Drag a bigger one.");
+  if (kind === "free") { const keep = [P[0]]; for (const q of P) { const l = keep[keep.length - 1]; if (Math.hypot(q[0] - l[0], q[1] - l[1]) >= 3) keep.push(q); } P = keep; }
+  const r = canvas.getBoundingClientRect(), n = latexTri.n, c = latexTri.cen, nr = latexTri.nor, cp = camera.position;
+  const v = new V3(), cell = 3, gw = Math.ceil(r.width / cell) + 1, gh = Math.ceil(r.height / cell) + 1;
+  const zbuf = new Float32Array(gw * gh).fill(Infinity), sx = new Float32Array(n), sy = new Float32Array(n), dep = new Float32Array(n), cand = [];
+  for (let i = 0; i < n; i++) {
+    const dx = c[i * 3] - cp.x, dy = c[i * 3 + 1] - cp.y, dz = c[i * 3 + 2] - cp.z, d = Math.hypot(dx, dy, dz) || 1;
+    v.set(c[i * 3], c[i * 3 + 1], c[i * 3 + 2]).project(camera);
+    if (v.z > 1 || v.z < -1) continue;
+    const x = (v.x + 1) / 2 * r.width, y = (1 - v.y) / 2 * r.height;
+    if (x < 0 || y < 0 || x > r.width || y > r.height) continue;
+    sx[i] = x; sy[i] = y; dep[i] = d;
+    const k = ((y / cell) | 0) * gw + ((x / cell) | 0);
+    if (d < zbuf[k]) zbuf[k] = d; // anything, facing or not, can hide what's behind it
+    if ((nr[i * 3] * dx + nr[i * 3 + 1] * dy + nr[i * 3 + 2] * dz) / d < -0.05 && x >= x0 && x <= x1 && y >= y0 && y <= y1) cand.push(i);
+  }
+  const tol = Math.max(1.5, size() * 0.01), val = MASK.brush === "add" ? 1 : 0, hit = [];
+  const inside = new Uint8Array(n);
+  for (const i of cand) {
+    if (!pointInPoly(sx[i], sy[i], P)) continue;
+    inside[i] = 1;
+    const gx = (sx[i] / cell) | 0, gy = (sy[i] / cell) | 0;
+    let zmin = Infinity; // the nearest surface round this spot
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const k = (gy + a) * gw + gx + b; if (k >= 0 && k < zbuf.length && zbuf[k] < zmin) zmin = zbuf[k]; }
+    if (dep[i] <= zmin + tol) { hit.push(i); inside[i] = 2; }
+  }
+  // the surface you can see, spread over everything joined to it inside the
+  // outline, so steep sides come out whole instead of speckled
+  const adj = maskAdj();
+  for (let h = 0; h < hit.length; h++) {
+    const i = hit[h];
+    for (let j = 0; j < 3; j++) { const k = adj[i * 3 + j]; if (k >= 0 && inside[k] === 1) { inside[k] = 2; hit.push(k); } }
+  }
+  if (!hit.length) return toast("That shape misses the model. Draw it over the part you want.");
+  maskMark();
+  for (const i of hit) MASK.sel[i] = val;
+  maskPaintAll(); maskChanged();
+}
+function maskSetTool(t) {
+  MASK.tool = t;
+  $$("#maskTool [data-tool]").forEach((x) => x.classList.toggle("on", x.dataset.tool === t));
+  $("#maskSizeBox").hidden = t !== "brush";
+  canvas.style.cursor = maskTab() && t !== "brush" ? "crosshair" : "";
+  if (t !== "brush" && $("#brushRing")) $("#brushRing").hidden = true;
+}
+$$("#maskTool [data-tool]").forEach((b) => b.onclick = () => maskSetTool(b.dataset.tool));
+function maskSetBrush(b) {
+  MASK.brush = b;
+  $$("#maskBrush [data-brush]").forEach((x) => x.classList.toggle("on", x.dataset.brush === b));
+  const ring = $("#brushRing"); if (ring) ring.classList.toggle("erase", b === "erase");
+}
+function maskSetSize(v) {
+  MASK.size = Math.max(1, Math.min(40, +v));
+  $("#maskSize").value = MASK.size; $("#maskSizeV").textContent = `${+MASK.size.toFixed(1)} mm`;
+  try { localStorage.setItem("gs.maskBrush", String(MASK.size)); } catch (e) { /* no storage */ }
+}
+try { const v = +localStorage.getItem("gs.maskBrush"); if (v) maskSetSize(v); } catch (e) { /* no storage */ }
+$$("#maskBrush [data-brush]").forEach((b) => b.onclick = () => maskSetBrush(b.dataset.brush));
+$("#maskSize").addEventListener("input", () => maskSetSize($("#maskSize").value));
+function maskKey(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return false;
+  const k = e.key.toLowerCase();
+  if (k === "b") { maskSetBrush("add"); return true; }
+  if (k === "e") { maskSetBrush("erase"); return true; }
+  const tool = { o: "ellipse", x: "box", f: "free", u: "brush" }[k];
+  if (tool) { maskSetTool(tool); return true; }
+  if (e.key === "[" || e.key === "]") { maskSetSize(MASK.size * (e.key === "]" ? 1.25 : 0.8)); return true; }
+  return false;
+}
+// the whole area at once
+function maskAll(fn) {
+  if (!MASK.sel || !latexTri) return;
+  maskMark(); fn(); maskPaintAll(); maskChanged();
+}
+$("#maskFacing").onclick = () => maskAll(() => {
+  const c = latexTri.cen, nr = latexTri.nor, cp = camera.position;
+  for (let i = 0; i < latexTri.n; i++) {
+    const dx = c[i * 3] - cp.x, dy = c[i * 3 + 1] - cp.y, dz = c[i * 3 + 2] - cp.z, l = Math.hypot(dx, dy, dz) || 1;
+    if ((nr[i * 3] * dx + nr[i * 3 + 1] * dy + nr[i * 3 + 2] * dz) / l < -0.15) MASK.sel[i] = 1;
+  }
+});
+$("#maskInvert").onclick = () => maskAll(() => { for (let i = 0; i < MASK.sel.length; i++) MASK.sel[i] = MASK.sel[i] ? 0 : 1; });
+$("#maskClear").onclick = () => maskAll(() => MASK.sel.fill(0));
+function maskGrow(v) {
+  const adj = maskAdj(), s = MASK.sel, next = s.slice();
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === v) continue;
+    for (let j = 0; j < 3; j++) { const k = adj[i * 3 + j]; if (k < 0 ? v === 0 : s[k] === v) { next[i] = v; break; } }
+  }
+  MASK.sel = next;
+}
+$("#maskGrow").onclick = () => maskAll(() => maskGrow(1));
+$("#maskShrink").onclick = () => maskAll(() => maskGrow(0));
+function maskStats() {
+  const kv = $("#maskKv");
+  if (!MASK.sel || !latexTri) { kv.innerHTML = ""; $("#tabMask").textContent = ""; return; }
+  let a = 0; const ar = latexTri.area;
+  for (let i = 0; i < MASK.sel.length; i++) if (MASK.sel[i]) a += ar[i];
+  const pct = 100 * a / latexTri.total;
+  $("#tabMask").textContent = a > 0 ? `${pct < 1 ? pct.toFixed(1) : Math.round(pct)}%` : "";
+  kv.innerHTML = a > 0 ? `<dt>Painted</dt><dd>${(a / 100).toFixed(1)} cm² · ${pct.toFixed(pct < 10 ? 1 : 0)}% of the model</dd>` : "";
+  $("#maskBuild").disabled = !(a > 0);
+}
+// the built mask in the view
+function maskDropBuilt() {
+  groups.mask.clear(); MASK.mesh = null; MASK.info = null; $("#maskDone").hidden = true;
+}
+function maskVis() {
+  groups.mask.visible = S.step === "cut" && curTab() === "mask" && $("#maskShow").checked;
+  canvas.style.cursor = maskTab() && MASK.tool !== "brush" ? "crosshair" : canvas.style.cursor === "crosshair" && S.mode !== "draw" && !SPLIT.draw ? "" : canvas.style.cursor;
+  if (!maskTab() && $("#brushRing")) $("#brushRing").hidden = true;
+}
+$("#maskShow").onchange = maskVis;
+$("#maskBuild").onclick = () => {
+  if (!MASK.sel || !S.scan) return;
+  const ranges = maskRanges();
+  if (!ranges.length) { toast("Paint the area the mask should cover first."); return; }
+  withBusy("Making the paint mask", async () => {
+    const r = await api("/api/paint_mask", { n: MASK.n, ranges, settings: S.settings });
+    const g = await loadSTL(r.url);
+    groups.mask.clear();
+    MASK.mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xcfd8e3, roughness: 0.55, metalness: 0, transparent: true, opacity: 0.88, side: THREE.DoubleSide }));
+    groups.mask.add(MASK.mesh);
+    MASK.info = r;
+    $("#maskShow").checked = true; maskVis();
+    $("#maskDoneKv").innerHTML = `
+      <dt>Saved</dt><dd>${maskEsc(r.files[0].name)}</dd>
+      <dt>Size, as it prints</dt><dd>${r.print_mm.join(" × ")} mm</dd>
+      <dt>Openings</dt><dd>${r.openings}</dd>` + (r.pieces > 1 ? `<dt>Separate pieces</dt><dd>${r.pieces}</dd>` : "") + `
+      <dt>Thickness · gap</dt><dd>${r.thickness_mm} mm · ${r.gap_mm} mm</dd>` +
+      (r.fits_plate ? "" : `<dt>Plate</dt><dd class="bad">bigger than your plate</dd>`);
+    $("#maskDone").hidden = false;
+    toast(`Saved ${r.files[0].name} in the scan's folder, dome up and ready to slice (it needs supports under the dome).`, true);
+  }, true);
+};
+$("#maskOpen").onclick = () => api("/api/open", { what: "mask" }).catch((e) => toast(e.message));
+$("#maskFolder").onclick = () => api("/api/open", { what: "folder" }).catch((e) => toast(e.message));
 
 // ------------------------------------------------------------ start
 (async function start() {

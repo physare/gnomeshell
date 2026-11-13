@@ -303,7 +303,7 @@ h2 { margin: 6px 0 0; font-size: 12px; font-weight: 500; letter-spacing: 0.08em;
 #railIns.on { background: #2f3438; color: var(--latex); }
 .keys { top: 16px; left: 16px; max-height: calc(100% - 120px); z-index: 6; }
 /* the side panel's tabs: one job per tab */
-.ptabs { flex: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin: 14px 22px 0; padding: 4px; border-radius: 10px; background: var(--ground); }
+.ptabs { flex: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; margin: 14px 22px 0; padding: 4px; border-radius: 10px; background: var(--ground); }
 .ptabs button { min-height: 44px; padding: 4px 2px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-weight: 500; line-height: 1.25; }
 .ptabs button:hover { color: var(--text); }
 .ptabs button[aria-selected="true"] { background: #2f3438; color: var(--text); }
@@ -311,7 +311,15 @@ h2 { margin: 6px 0 0; font-size: 12px; font-weight: 500; letter-spacing: 0.08em;
 #paneCut[data-tab="scan"] .scroll > [data-in]:not([data-in="scan"]),
 #paneCut[data-tab="cuts"] .scroll > [data-in]:not([data-in="cuts"]),
 #paneCut[data-tab="insert"] .scroll > [data-in]:not([data-in="insert"]),
-#paneCut[data-tab="settings"] .scroll > [data-in]:not([data-in="settings"]) { display: none; }
+#paneCut[data-tab="settings"] .scroll > [data-in]:not([data-in="settings"]),
+#paneCut[data-tab="mask"] .scroll > [data-in]:not([data-in="mask"]) { display: none; }
+.mask-pane { display: grid; gap: 12px; }
+.mask-pane h2 { margin: 0; }
+.mask-pane .kv:empty { display: none; }
+#maskDone { display: grid; gap: 10px; }
+#maskDone[hidden] { display: none; }
+#brushRing { position: absolute; pointer-events: none; border: 1.5px solid var(--gold-ink, #f0b85a); border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,.35); transform: translate(-50%, -50%); }
+#brushRing.erase { border-style: dashed; border-color: #f0f0f0; }
 #insertBox > summary, .settings-head { display: none; }
 #insertBox { border: 0; background: transparent; }
 #insertBox > .group-body { padding: 0; }
@@ -646,3 +654,4 @@ body.no-panel .panel { display: none; }
 .modal-title { font-weight: 500; font-size: 16px; }
 .modal-text { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 8px 0 18px; }
 .modal-btns { display: flex; justify-content: flex-end; gap: 8px; }
+#maskSizeBox[hidden] { display: none; }
