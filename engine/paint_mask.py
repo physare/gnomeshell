@@ -1,35 +1,57 @@
 """Paint mask: a thin printed cover that sits over part of a model, with
 openings where the paint should go.
 
-The person paints the area to cover on the model (and rubs out the openings,
-such as the eyes). That patch of the model's surface is lifted off it by the
-gap and thickened by the mask's thickness, so the mask follows the model's own
-shape and sits just clear of the paint. The walls round every edge close it
-into a solid that prints. Round the openings the mask thins down to a fine
-edge, so the spray reaches right to the surface and the paint line is crisp.
+The area to cover is a distance field on the model's corners, in mm: below
+zero inside the mask, above zero outside, zero on its edge. The screen builds
+it from the outlines drawn on the model (and the brush, and the raised
+features found here), so an edge drawn as an ellipse stays an ellipse however
+big the scan's triangles are: the model is cut exactly along the zero line.
+That patch of the surface is lifted off the model by the gap and thickened by
+the mask's thickness, so the mask follows the model's own shape and sits just
+clear of the paint. Walls round every edge close it into a solid that prints.
+Round the openings it thins down to a fine edge, so the spray reaches right to
+the surface and the paint line is crisp.
 
 Plain numpy, so it runs (and is tested) without Blender."""
+import base64
+
 import numpy as np
 
-
-def ranges_to_mask(ranges, n):
-    """[[start, length], ...] runs of picked triangles -> bool array of n."""
-    sel = np.zeros(n, dtype=bool)
-    for r in ranges or []:
-        a, k = int(r[0]), int(r[1])
-        if a < 0 or k <= 0 or a + k > n:
-            raise ValueError("The painted mask doesn't match this scan. Paint it again.")
-        sel[a:a + k] = True
-    return sel
+OUT = 100.0  # "nowhere near the mask", in mm
 
 
-def mask_to_ranges(sel):
-    sel = np.asarray(sel, dtype=bool)
-    if not sel.any():
-        return []
-    d = np.diff(np.concatenate([[0], sel.astype(np.int8), [0]]))
-    starts, ends = np.flatnonzero(d == 1), np.flatnonzero(d == -1)
-    return [[int(a), int(b - a)] for a, b in zip(starts, ends)]
+def screen_ids(co, tris):
+    """How the screen numbers the model's corners: the preview STL lists each
+    triangle's three corners, and the screen gives each new position (float32,
+    exactly) the next number. Returns (id of each server corner, count)."""
+    pos = (np.asarray(co, dtype=np.float32)[np.asarray(tris).reshape(-1)] + np.float32(0)).view(np.int32).reshape(-1, 3)
+    _, first, inv = np.unique(pos, axis=0, return_index=True, return_inverse=True)
+    inv = inv.reshape(-1)
+    order = np.argsort(first, kind="stable")
+    rank = np.empty(len(first), dtype=np.int64)
+    rank[order] = np.arange(len(first))
+    sid = np.full(len(co), -1, dtype=np.int64)
+    sid[np.asarray(tris).reshape(-1)] = rank[inv]
+    return sid, len(first)
+
+
+def field_from_b64(b64, co, tris):
+    """The screen's field (float32 per screen corner, base64) as one value per server corner."""
+    sid, n = screen_ids(co, tris)
+    try:
+        f = np.frombuffer(base64.b64decode(b64), dtype="<f4").astype(np.float64)
+    except Exception:
+        raise ValueError("The mask didn't come through. Draw it again.")
+    if len(f) != n:
+        raise ValueError("The mask doesn't match this scan. Draw it again.")
+    out = np.full(len(co), OUT)
+    ok = sid >= 0
+    out[ok] = f[sid[ok]]
+    return out
+
+
+def to_b64(values):
+    return base64.b64encode(np.asarray(values, dtype="<f4").tobytes()).decode("ascii")
 
 
 def _weld(co, tris, tol=1e-5):
@@ -136,31 +158,104 @@ def _dist_to(pts, targets, chunk=4096):
     return out
 
 
-def build(co, tris, sel, thickness=1.2, gap=0.3, fine_edge=True, edge_mm=0.45):
+def _cut(co, vn, tris, f):
+    """The part of the surface where f < 0, cut exactly along f = 0: new
+    corners where an edge crosses zero (shared by both triangles on that
+    edge, so the patch stays in one piece). Returns (co, normals, patch tris)."""
+    f = f.copy()
+    f[np.abs(f) < 1e-4] = 1e-4  # no corner sits right on the edge (no sliver triangles)
+    ins = f < 0
+    k = ins[tris].sum(1)
+    keep = [tris[k == 3]]
+    new_co, new_n, cache = [], [], {}
+    base = len(co)
+
+    def cross(a, b):
+        key = (a, b) if a < b else (b, a)
+        i = cache.get(key)
+        if i is None:
+            t = f[a] / (f[a] - f[b])
+            new_co.append(co[a] + t * (co[b] - co[a]))
+            m = vn[a] + t * (vn[b] - vn[a])
+            new_n.append(m / (np.linalg.norm(m) or 1))
+            i = cache[key] = base + len(new_co) - 1
+        return i
+    out = []
+    for t3, kk in zip(tris[(k == 1) | (k == 2)], k[(k == 1) | (k == 2)]):
+        a, b, c = (int(x) for x in t3)
+        # turn the triangle so its odd corner out is first
+        for _ in range(3):
+            if (kk == 1 and ins[a]) or (kk == 2 and not ins[a]):
+                break
+            a, b, c = b, c, a
+        if kk == 1:  # a inside
+            out.append((a, cross(a, b), cross(a, c)))
+        else:  # b, c inside, a outside
+            pab, pac = cross(a, b), cross(a, c)
+            out.append((pab, b, c))
+            out.append((pab, c, pac))
+    if out:
+        keep.append(np.array(out, dtype=np.int64))
+    if new_co:
+        co = np.vstack([co, np.array(new_co)])
+        vn = np.vstack([vn, np.array(new_n)])
+    return co, vn, np.vstack(keep) if keep else np.zeros((0, 3), dtype=np.int64)
+
+
+def _taubin(P, tris, fixed, passes=4, lam=0.5, mu=-0.53):
+    """Smooth the patch's own surface a little (without shrinking it), so a
+    low-detail scan's flat facets don't print into the mask."""
+    e = np.concatenate([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]])
+    e = np.unique(np.sort(e, 1), axis=0)
+    nv = len(P)
+    deg = np.bincount(e.ravel(), minlength=nv).astype(float)
+    deg[deg == 0] = 1
+    P = P.copy()
+    for _ in range(passes):
+        for w in (lam, mu):
+            s = np.zeros_like(P)
+            for k in range(3):
+                s[:, k] = np.bincount(e[:, 0], P[e[:, 1], k], nv) + np.bincount(e[:, 1], P[e[:, 0], k], nv)
+            step = w * (s / deg[:, None] - P)
+            step[fixed] = 0
+            P += step
+    return P
+
+
+def build(co, tris, field, thickness=1.2, gap=0.1, fine_edge=True, edge_mm=0.45, smooth=True):
     """The mask as a closed mesh: (verts, tris, info).
 
-    co, tris: the whole model (world space, mm); sel: bool per triangle, the
-    area to cover. gap: how far the mask sits off the model's surface
-    (negative tucks it in, e.g. to fit a cast when the scan is of the latex).
-    fine_edge: thin down to edge_mm round the openings."""
+    co, tris: the whole model (world space, mm); field: one value per corner of
+    co, below zero where the mask goes. gap: how far the mask sits off the
+    model's surface (negative tucks it in, e.g. to fit a cast when the scan is
+    of the latex). fine_edge: thin down to edge_mm round the openings."""
     co = np.asarray(co, dtype=np.float64)
     tris = np.asarray(tris, dtype=np.int64)
-    sel = np.asarray(sel, dtype=bool)
-    if len(sel) != len(tris):
-        raise ValueError("The painted mask doesn't match this scan. Paint it again.")
-    if not sel.any():
+    field = np.asarray(field, dtype=np.float64)
+    if len(field) != len(co):
+        raise ValueError("The mask doesn't match this scan. Draw it again.")
+    if not (field < 0).any():
         raise ValueError("Select the area the mask should cover first.")
     thickness, gap = float(thickness), float(gap)
     if not (0.2 <= thickness <= 20):
         raise ValueError("Mask thickness must be from 0.2 to 20 mm.")
-    co, tris = _weld(co, tris)
+    key = np.round(co / 1e-5).astype(np.int64)
+    _, first, inv = np.unique(key, axis=0, return_index=True, return_inverse=True)
+    co, tris, field = co[first], inv.reshape(-1)[tris], field[first]
     vn, tris = _vertex_normals(co, tris)  # normals from the whole model, so the edges agree
-    patch = tris[sel]
+    co, vn, patch = _cut(co, vn, tris, field)
     a, b, c = co[patch[:, 0]], co[patch[:, 1]], co[patch[:, 2]]
-    patch = patch[np.linalg.norm(np.cross(b - a, c - a), axis=1) > 1e-12]
+    ar = np.linalg.norm(np.cross(b - a, c - a), axis=1)
+    patch, ar = patch[ar > 1e-10], ar[ar > 1e-10]
+    # stray specks (a sliver caught on the far side of an ear, say) aren't worth printing
+    if len(patch):
+        roots = _components(patch, len(co))[patch[:, 0]]
+        u, inv = np.unique(roots, return_inverse=True)
+        tot = np.bincount(inv, ar)
+        patch = patch[tot[inv] >= max(0.05 * tot.max(), 200.0)]  # area here is doubled: 1 cm2
     bedges, patch = _boundary(patch)
     if not len(patch):
-        raise ValueError("The painted area is too small to make a mask from.")
+        raise ValueError("The selected area is too small to make a mask from.")
     # just the corners the patch uses, numbered afresh
     used = np.unique(patch)
     remap = -np.ones(len(co), dtype=np.int64)
@@ -179,14 +274,9 @@ def build(co, tris, sel, thickness=1.2, gap=0.3, fine_edge=True, edge_mm=0.45):
             longest[r] = (L, i)
     outer = {i for _, i in longest.values()}
     holes = [lp for i, lp in enumerate(loops) if i not in outer]
-    # the painted edge follows the model's triangles, so it zigzags: smooth each
-    # edge along itself so the openings (and so the paint line) come out clean
     P = P.copy()
-    for lp in loops:
-        if len(lp) < 6:
-            continue
-        for _ in range(4):
-            P[lp] = 0.5 * P[lp] + 0.25 * (P[np.roll(lp, 1)] + P[np.roll(lp, -1)])
+    if smooth:
+        P = _taubin(P, patch, np.zeros(nv, dtype=bool))
     t = np.full(nv, thickness)
     if fine_edge and holes and thickness > edge_mm:
         hv = np.unique(np.concatenate(holes))
@@ -205,7 +295,7 @@ def build(co, tris, sel, thickness=1.2, gap=0.3, fine_edge=True, edge_mm=0.45):
     lo, hi = V.min(0), V.max(0)
     info = {"openings": len(holes), "pieces": len(longest), "area_cm2": round(float(area) / 100, 1),
             "size_mm": [round(float(x), 1) for x in hi - lo], "thickness_mm": thickness, "gap_mm": gap,
-            "fine_edge": bool(fine_edge and holes), "triangles": int(len(F))}
+            "fine_edge": bool(fine_edge and holes), "smooth": bool(smooth), "triangles": int(len(F))}
     return V, F, info
 
 
@@ -233,3 +323,82 @@ def print_pose(V, F):
     M[:3, :3] = R
     M[2, 3] = -W[:, 2].min()
     return M
+
+
+def _edges(tris):
+    e = np.concatenate([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]])
+    return np.unique(np.sort(e, 1), axis=0)
+
+
+def _diffuse(co, E, iters, lam=0.6):
+    nv = len(co)
+    deg = np.bincount(E.ravel(), minlength=nv).astype(float)
+    deg[deg == 0] = 1
+    x = co.copy()
+    for _ in range(iters):
+        s = np.zeros_like(x)
+        for k in range(x.shape[1]):
+            s[:, k] = np.bincount(E[:, 0], x[E[:, 1], k], nv) + np.bincount(E[:, 1], x[E[:, 0], k], nv)
+        x += lam * (s / deg[:, None] - x)
+    return x
+
+
+def find_raised(co, tris, feature_mm=None, most=8):
+    """Bumps that stand up off the surface round them, like eyes: how far each
+    corner stands out from a smoothed copy of the model (smoothed over about
+    feature_mm), grouped into connected bumps. Returns a list, biggest first, of
+    {center, normal, width_mm, raised_mm, dist}: dist is the signed distance (mm)
+    from each corner to the bump's edge, below zero on the bump."""
+    co = np.asarray(co, dtype=np.float64)
+    tris = np.asarray(tris, dtype=np.int64)
+    E = _edges(tris)
+    el = float(np.linalg.norm(co[E[:, 0]] - co[E[:, 1]], axis=1).mean())
+    size = float((co.max(0) - co.min(0)).max())
+    R = float(feature_mm) if feature_mm else 0.08 * size
+    iters = int(min(800, max(8, (R / max(el, 1e-6)) ** 2)))
+    vn, _ = _vertex_normals(co, tris, smooth=1)
+    d = np.einsum("ij,ij->i", co - _diffuse(co, E, iters), vn)
+    # smooth the measure itself a little, so a bumpy scan gives round edges
+    d = _diffuse(d[:, None], E, int(min(200, max(2, (0.3 * R / max(el, 1e-6)) ** 2))))[:, 0]
+    med = float(np.median(d))
+    spread = max(float(np.percentile(d, 90)) - med, 1e-6)
+    lo, hi = med + spread, med + 3 * spread
+    inr = d > lo
+    # connected bumps among the raised corners
+    parent = np.arange(len(co))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    for a, b in E[inr[E[:, 0]] & inr[E[:, 1]]]:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+    idx = np.flatnonzero(inr)
+    roots = np.array([find(v) for v in idx])
+    out = []
+    for r in np.unique(roots):
+        m = idx[roots == r]
+        if len(m) < 3 or d[m].max() < hi:
+            continue
+        # the bump's edge: where each edge leaving it crosses lo
+        mask = np.zeros(len(co), dtype=bool)
+        mask[m] = True
+        cross = E[mask[E[:, 0]] != mask[E[:, 1]]]
+        a, b = cross[:, 0], cross[:, 1]
+        t = np.clip((lo - d[a]) / np.where(d[b] - d[a] == 0, 1e-9, d[b] - d[a]), 0, 1)
+        pts = co[a] + t[:, None] * (co[b] - co[a])
+        c = co[m].mean(0)
+        w = float(np.linalg.norm(co[m] - c, axis=1).max() * 2)
+        near = np.linalg.norm(co - c, axis=1) < w / 2 + 80
+        dist = np.full(len(co), OUT)
+        dist[near] = _dist_to(co[near], pts)
+        dist[mask] *= -1
+        nrm = vn[m].sum(0)
+        nrm /= np.linalg.norm(nrm) or 1
+        out.append({"center": c, "normal": nrm, "width_mm": w, "raised_mm": float(d[m].max() - med),
+                    "score": float((d[m] - lo).sum()), "dist": np.clip(dist, -OUT, OUT)})
+    out.sort(key=lambda o: -o["score"])
+    return out[:most]
