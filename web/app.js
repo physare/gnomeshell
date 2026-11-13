@@ -1665,7 +1665,7 @@ function fillSettings() {
   $("#shellNote").textContent = hug ? "Follows the latex, with a raised strip on each seam and notches for the cord. Uses far less filament. The silicone insert needs Box." : "";
   const ss = S.settings, set = (id, t) => { const el = $(id); if (el) el.textContent = t; };
   set("#sumPour", +ss.pour_extend_mm ? `${ss.pour_extend_mm} mm` : "off");
-  set("#sumShell", hug ? `hugs the latex · ${+ss.contour_mm} mm` : `box · ${+ss.wall_mm} mm wall`);
+  set("#sumShell", hug ? `contour shell · ${+ss.contour_mm} mm` : `box · ${+ss.wall_mm} mm wall`);
   set("#sumChan", hug ? `Ø${ss.hole_d_mm} mm cord · notches every ${+ss.notch_gap_mm} mm` : +ss.holes_per_corner ? `Ø${ss.hole_d_mm} mm · ${ss.holes_per_corner}/corner${ss.channel_pairs ? " · pairs" : ""}` : "none");
   set("#sumSlice", `${ss.test_slice_style === "VERTICAL" ? "upright" : "level"} · ${ss.test_slice_mm} mm`);
   set("#sumPrinter", `${ss.bed_mm} × ${ss.bed_d_mm ?? ss.bed_mm} × ${ss.bed_h_mm} mm`);
@@ -1676,7 +1676,7 @@ function fillSettings() {
   const d = $("#defaults");
   const inch = (mm) => (Math.abs(mm - 6.35) < 0.01 ? "¼ in (6.35 mm)" : `${mm} mm`);
   d.innerHTML = `
-    <dt>Shell style</dt><dd>${hug ? "hugs the latex" : "box"}</dd>` + (hug ? `
+    <dt>Shell style</dt><dd>${hug ? "contour shell" : "box"}</dd>` + (hug ? `
     <dt>Thickness</dt><dd>${+ss.contour_mm} mm</dd>
     <dt>Seam strips</dt><dd>${+ss.strip_w_mm} mm out · ${+ss.strip_t_mm} mm thick</dd>
     <dt>Cord notches</dt><dd>Ø${ss.hole_d_mm} mm cord · every ${+ss.notch_gap_mm} mm</dd>
@@ -2826,7 +2826,7 @@ function paintTabs() {
   $("#tabScan").textContent = d && d.length >= 3 ? `${Math.round(+d[2])} mm tall` : "";
   $("#tabCuts").textContent = S.T ? `${S.T.pieces.length} piece${S.T.pieces.length === 1 ? "" : "s"}` : "";
   $("#tabInsert").textContent = S.insert?.on ? "on" : "off";
-  $("#tabSettings").textContent = contourStyle() ? `hugs · ${+S.settings.contour_mm} mm` : S.settings?.wall_mm != null ? `${+(+S.settings.wall_mm).toFixed(2)} mm wall` : "";
+  $("#tabSettings").textContent = contourStyle() ? `contour · ${+S.settings.contour_mm} mm` : S.settings?.wall_mm != null ? `${+(+S.settings.wall_mm).toFixed(2)} mm wall` : "";
 }
 
 // ------------------------------------------------------------ steps
@@ -3067,7 +3067,7 @@ async function showBuild(res) {
     return;
   }
   $("#doneKv").innerHTML = `
-    ` + (res.shell_style === "CONTOUR" ? `<dt>Shell</dt><dd>hugs the latex · ${d.join(" × ")} mm across</dd>
+    ` + (res.shell_style === "CONTOUR" ? `<dt>Shell</dt><dd>contour shell · ${d.join(" × ")} mm across</dd>
     <dt>Cord notches</dt><dd>${res.notches}</dd>
     <dt>Alignment bumps</dt><dd>${res.bumps || "none"}</dd>` : `<dt>Box</dt><dd>${d.join(" × ")} mm</dd>
     <dt>Bungee channels</dt><dd>${res.channels}${res.skipped_channels ? ` (${res.skipped_channels} skipped at a cut)` : ""}</dd>`) + `

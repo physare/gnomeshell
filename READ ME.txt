@@ -322,7 +322,7 @@ USE
          one has a range, and a number outside it is refused with a note.
          "Reset to the defaults" puts them back.
        - Shell style (Settings tab, Shell): Box is the solid box with
-         bungee channels. Hug the latex makes a shell that follows the
+         bungee channels. Contour Shell makes a shell that follows the
          latex instead, Thickness thick (4 mm by default), with a raised
          strip along each seam, a U notch at the strip tips every Notch
          spacing for the bungee cord to wrap round the whole mold, a flat
