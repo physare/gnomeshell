@@ -329,6 +329,22 @@ USE
          Foot round the bottom so it stands, and Alignment bumps on the
          strips so the pieces line up. Far less filament and print time.
          The silicone insert needs the Box style for now.
+  TABS: every scan you open gets a tab under the menus, like a browser's,
+     so you can have several on the go. Click a tab (or Ctrl+Tab and
+     Ctrl+Shift+Tab) to go to it: it comes back the way you left it, with
+     its cuts, view, step and build. + (or Ctrl+T) is a new tab for
+     opening another scan; a scan that's already open just goes to its tab.
+     The X on a tab (or Ctrl+W, or a middle click) closes it after asking;
+     the scan, its cuts and its files stay, under Recent scans. The tabs you
+     had open come back the next time GnomeShell starts.
+     Builds take turns: one builds at a time, in the background, and the
+     rest wait in a queue and start by themselves. You can keep working,
+     in that tab or another, while they do. A tab that's building shows a
+     spinner (an empty ring while it waits); a green dot means its build
+     finished while you were somewhere else. The bar over the view has
+     Stop (or Take it out, while it's waiting). A build uses the scan and
+     cuts as they were when you pressed Build, so changing them after
+     doesn't change that build.
   3. Test slices only cuts just the slices, in a fraction of the time, so
      you can check the fit before printing the shell. They're exactly the
      slices the full build makes. It clears the scan's folder first, so an

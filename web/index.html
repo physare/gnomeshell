@@ -40,6 +40,10 @@
     <span class="file" id="fileName" data-raw></span>
     <span class="meta mono" id="fileMeta">Starting…</span>
   </header>
+  <nav class="tabstrip" id="tabstrip" aria-label="Open scans">
+    <div class="tabs" id="tabs" role="tablist" aria-label="Open scans"></div>
+    <button type="button" class="tab-new" id="tabNew" title="New tab (Ctrl+T): open another scan" aria-label="New tab">+</button>
+  </nav>
   <div class="toolhdr" id="toolhdr" hidden>
     <div class="tgrp" id="editTools">
       <button type="button" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
@@ -137,6 +141,18 @@
           <div class="spinner" aria-hidden="true"></div>
           <div><div class="busy-title" id="busyTitle">Working…</div><div class="busy-sub" id="busySub"></div></div>
           <button type="button" class="btn sm" id="busyCancel" hidden>Stop</button>
+        </div>
+      </div>
+      <div class="buildbar" id="buildBar" role="status" aria-live="polite" hidden>
+        <div class="spinner sm" aria-hidden="true"></div>
+        <div class="bb-text"><div class="bb-title" id="bbTitle"></div><div class="bb-sub" id="bbSub"></div></div>
+        <button type="button" class="btn sm" id="bbStop">Stop</button>
+      </div>
+      <div class="modal" id="closeAsk" role="dialog" aria-modal="true" aria-labelledby="closeAskTitle" hidden>
+        <div class="modal-card">
+          <div class="modal-title" id="closeAskTitle"></div>
+          <p class="modal-text" id="closeAskText"></p>
+          <div class="modal-btns"><button type="button" class="btn" id="closeAskNo">Keep it open</button><button type="button" class="btn primary" id="closeAskYes">Close tab</button></div>
         </div>
       </div>
       <div class="warnbar" id="engineWarn" role="alert" hidden><span id="engineWarnText"></span><button type="button" class="btn sm" id="engineWarnClose">Close this window</button></div>
