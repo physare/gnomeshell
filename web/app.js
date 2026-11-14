@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.16.2"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.16.3"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -3710,7 +3710,12 @@ function maskRing(xy, hit) {
   el.style.top = (r.top - canvas.parentElement.getBoundingClientRect().top + xy[1]) + "px";
 }
 canvas.addEventListener("pointerdown", (e) => {
-  if (!maskTab() || e.button !== 0 || e.altKey || MASK.tool === "view") return; // no tool: turn the view as usual
+  // On the Mask tab the middle button, and Shift with the left, turn the view
+  // even with a tool picked (the view's own Shift+left would pan instead).
+  const mt = maskTab();
+  orbit.mouseButtons.LEFT = mt && e.shiftKey ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+  orbit.mouseButtons.MIDDLE = mt ? THREE.MOUSE.ROTATE : THREE.MOUSE.DOLLY;
+  if (!mt || e.button !== 0 || e.altKey || e.shiftKey || MASK.tool === "view") return; // turn the view as usual
   if (MASK.tool !== "brush") { // draw an outline round the area, on or off the model
     e.stopImmediatePropagation(); e.preventDefault();
     shapeDraw = { kind: MASK.tool, pts: [screenXY(e)], mask: true };
