@@ -382,8 +382,9 @@ USE
      Ellipse, Box or Free line (Shift, pressed after you start, makes a
      circle or a square) and draw round it with Add. Then press Cut out
      raised features: it finds the parts that stand up inside that area
-     (the eyes), cuts each out as an opening and numbers it in the view.
-     Fill in puts one back. Opening margin (0.5 mm) is how far past the
+     (the eyes, even drawn as a raised rim with a pupil), cuts each out as
+     an opening and numbers it in the view. Much smaller raised spots are
+     listed but left filled in. Fill in and Cut out change any of them. Opening margin (0.5 mm) is how far past the
      raised edge each opening goes; Feature size sets how wide a part to
      look for. Or draw round each opening yourself with Subtract.
      Everything visible inside the outline changes,
