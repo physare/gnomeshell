@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.16.3"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.16.4"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -3669,6 +3669,7 @@ function maskMark() {
   MASK.redo = [];
 }
 function maskChanged() {
+  if (MASK.feats && !MASK.featEdit) maskFeatsDrop(); // edited by hand: the openings stay as they are
   maskStats(); maskPaintAll();
   clearTimeout(MASK.saveT);
   const nv = MASK.nv, name = MASK.name, f = MASK.f;
@@ -3889,28 +3890,32 @@ function maskStats() {
   $("#tabMask").textContent = a > 0 ? `${pct < 1 ? pct.toFixed(1) : Math.round(pct)}%` : "";
   kv.innerHTML = a > 0 ? `<dt>Mask area</dt><dd>${(a / 100).toFixed(1)} cm² · ${pct.toFixed(pct < 10 ? 1 : 0)}% of the model</dd>` : "";
   $("#maskBuild").disabled = !(a > 0);
+  $("#maskFind").disabled = !(a > 0) && !MASK.featBase;
 }
-// ---- raised features: the engine finds bumps like eyes; the mask goes round
-// the ticked ones, from their edge out to Mask reaches, with the openings
-// Opening margin past their edge
-function maskFeatsDrop() { MASK.feats = null; $("#maskFeat").hidden = true; groups.maskMarks.clear(); }
+// ---- raised features: once an area is selected, the engine finds the bumps
+// inside it (the eyes, say) and each is cut out of it as an opening, Opening
+// margin past its edge. Fill in puts one back.
+function maskFeatsDrop() { MASK.feats = null; MASK.featBase = null; $("#maskFeat").hidden = true; groups.maskMarks.clear(); }
 function maskFeatApply() {
-  const F = (MASK.feats || []).filter((x) => x.on);
-  if (!F.length) return;
-  const reach = Math.max(1, +$("#maskReach").value || 12), margin = +$("#maskMargin").value || 0, f = MASK.f;
+  const base = MASK.featBase, F = (MASK.feats || []).filter((x) => x.on);
+  if (!base) return;
+  const margin = +$("#maskMargin").value || 0, f = MASK.f;
   for (let v = 0; v < MASK.nv; v++) {
     let e = MASK_OUT;
     for (const x of F) if (x.d[v] < e) e = x.d[v];
-    f[v] = Math.max(e - margin - reach, margin - e);
+    f[v] = Math.max(base[v], margin - e);
   }
 }
+function maskFeatEdit() { MASK.featEdit = true; try { maskFeatApply(); maskChanged(); } finally { MASK.featEdit = false; } }
 function maskFeatRender() {
   const list = $("#maskFeatList"); list.innerHTML = "";
   groups.maskMarks.clear();
   MASK.feats.forEach((x, k) => {
-    const row = document.createElement("label");
-    row.innerHTML = `<input type="checkbox"${x.on ? " checked" : ""}> <span class="num">${k + 1}</span> <span>${x.width_mm} mm across</span><span class="mono">raised ${x.raised_mm} mm</span>`;
-    row.querySelector("input").onchange = (e) => { x.on = e.target.checked; maskMark(); maskFeatApply(); maskChanged(); };
+    const row = document.createElement("div");
+    row.className = x.on ? "" : "off";
+    row.innerHTML = `<span class="num">${k + 1}</span><span>Opening ${k + 1} · ${x.width_mm} mm across</span><button type="button" class="btn sm">${x.on ? "Fill in" : "Cut out"}</button>`;
+    row.querySelector("button").title = x.on ? "Puts this one back in the mask, with no opening" : "Cuts this one out of the mask as an opening";
+    row.querySelector("button").onclick = () => { x.on = !x.on; maskMark(); maskFeatEdit(); maskFeatRender(); };
     list.appendChild(row);
     const tag = textSprite(String(k + 1), Math.max(4, size() * 0.035), "#1b1d20", "#f0b85a");
     tag.position.set(...x.center.map((c, i) => c + x.normal[i] * (x.width_mm * 0.35 + 3)));
@@ -3919,24 +3924,22 @@ function maskFeatRender() {
   });
 }
 $("#maskFind").onclick = () => {
-  if (!S.scan) return;
-  withBusy("Looking for raised features", async () => {
+  if (!S.scan || !MASK.f) return;
+  const base = MASK.featBase || MASK.f.slice(); // again: search the area as it was before the cut-outs
+  withBusy("Looking for raised parts", async () => {
     const fs = +$("#maskFeatSize").value || null;
-    const r = await api("/api/mask_features", { feature_mm: fs });
+    const r = await api("/api/mask_features", { nv: MASK.nv, field: maskB64(base), feature_mm: fs });
     if (r.nv !== MASK.nv) throw new Error("The scan changed while looking. Try again.");
-    if (!r.features.length) { maskFeatsDrop(); toast("No raised features stand out on this scan. Try a different Feature size, or draw the mask yourself."); return; }
-    MASK.feats = r.features.map((x) => ({ ...x, d: maskFromB64(x.dist), on: false }));
-    // tick the two that face you most: turn the view to face the eyes first
-    const cp = camera.position, facing = (x) => { const d = new V3(...x.center).sub(cp).normalize(); return -d.dot(new V3(...x.normal)); };
-    const pick = MASK.feats.map((x, k) => ({ k, s: facing(x) * x.raised_mm })).filter((o) => o.s > 0).sort((a, b) => b.s - a.s).slice(0, 2);
-    pick.forEach((o) => { MASK.feats[o.k].on = true; });
-    if (!$("#maskFeatSize").value) $("#maskFeatSize").value = Math.round(0.08 * size());
-    $("#maskFeat").hidden = false; maskFeatRender();
-    maskMark(); maskFeatApply(); maskChanged();
-    toast(`Found ${r.features.length} raised feature${r.features.length === 1 ? "" : "s"}. ${pick.length ? `Ticked the ${pick.length === 1 ? "one" : "two"} facing you most; ` : ""}tick the ones to paint.`, true);
+    if (!r.features.length) { toast("Nothing stands up from the rest of the selected area. Try a smaller Feature size, or draw round each opening with Subtract."); return; }
+    maskMark();
+    MASK.f = base.slice(); MASK.featBase = base;
+    MASK.feats = r.features.map((x) => ({ ...x, d: maskFromB64(x.dist), on: true }));
+    $("#maskFeat").hidden = false; maskFeatRender(); maskFeatEdit();
+    const n = r.features.length;
+    toast(`Cut out ${n} opening${n === 1 ? "" : "s"}, numbered in the view. Fill in any that shouldn't be painted.`, true);
   }, true);
 };
-["#maskReach", "#maskMargin"].forEach((id) => $(id).addEventListener("change", () => { if (!MASK.feats) return; maskMark(); maskFeatApply(); maskChanged(); }));
+$("#maskMargin").addEventListener("change", () => { if (!MASK.feats) return; maskMark(); maskFeatEdit(); });
 // the built mask in the view
 function maskDropBuilt() {
   groups.mask.clear(); MASK.mesh = null; MASK.info = null; $("#maskDone").hidden = true;

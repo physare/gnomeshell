@@ -658,6 +658,7 @@ body.no-panel .panel { display: none; }
 #maskFeat { display: grid; gap: 10px; }
 #maskFeat[hidden] { display: none; }
 .mask-feats { display: grid; gap: 6px; }
-.mask-feats label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.mask-feats .mono { margin-left: auto; color: var(--muted); }
+.mask-feats > div { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.mask-feats > div .btn { margin-left: auto; }
+.mask-feats > div.off > span { opacity: .5; }
 .mask-feats .num { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--gold-soft, #3a2f1c); color: var(--gold-ink, #f0b85a); font: 600 11px var(--mono); }
