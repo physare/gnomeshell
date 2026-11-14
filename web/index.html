@@ -442,7 +442,7 @@
 
           <div class="mask-pane" data-in="mask">
             <div class="head-row h2help"><h2>Paint mask</h2><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="A thin cover that fits over the piece, with openings where the paint goes. Select the area to cover, subtract the openings (the eyes, say), and build it. Tape it on and spray through the openings.">?</span></div>
-            <p class="muted small" id="maskIntro">Find raised features picks out bumps like the eyes and puts the mask round them. To draw it yourself, pick Ellipse, Box or Free line and draw round the area with Add, then round each opening with Subtract. With no tool picked, dragging turns the view; Esc puts the tool down.</p>
+            <p class="muted small" id="maskIntro">Find raised features picks out bumps like the eyes and puts the mask round them. To draw it yourself, pick Ellipse, Box or Free line and draw round the area with Add, then round each opening with Subtract. With no tool picked, dragging turns the view. With a tool picked, Shift+drag or the middle mouse button turns it; Esc puts the tool down.</p>
             <button type="button" class="btn sm" id="maskFind" title="Looks for bumps that stand up from the surface round them, like eyes, and makes the mask round the ones you tick">Find raised features</button>
             <div id="maskFeat" hidden>
               <div id="maskFeatList" class="mask-feats"></div>
@@ -453,8 +453,8 @@
               </div>
             </div>
             <div class="seg four" role="group" aria-label="Draw with" id="maskTool">
-              <button type="button" data-tool="ellipse" title="Drag an ellipse round the area. Shift makes a circle. Click again or press Esc to put it down. (O)">Ellipse</button>
-              <button type="button" data-tool="box" title="Drag a box round the area. Shift makes a square. (X)">Box</button>
+              <button type="button" data-tool="ellipse" title="Drag an ellipse round the area. Shift after you start makes a circle. Click again or press Esc to put it down. (O)">Ellipse</button>
+              <button type="button" data-tool="box" title="Drag a box round the area. Shift after you start makes a square. (X)">Box</button>
               <button type="button" data-tool="free" title="Draw a loop round the area by hand (F)">Free line</button>
               <button type="button" data-tool="brush" title="Add or subtract by dragging on the model, for touching up (U)">Brush</button>
             </div>
