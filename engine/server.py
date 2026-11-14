@@ -47,7 +47,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.16.3"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.16.4"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -1291,14 +1291,17 @@ def job_mask_save(nv, field, name=None):
     return {"saved": True}
 
 
-def job_mask_features(feature_mm=None):
-    """Raised bumps on the model (eyes, say) to make the openings from: each
-    with its signed distance field, in the screen's corner numbering."""
+def job_mask_features(nv, field_b64, feature_mm=None):
+    """Raised bumps (eyes, say) inside the painted area, to cut out as the
+    openings: each with its signed distance field, in the screen's corner numbering."""
     latex = _latex()
     progress("Looking for raised features")
     co, tris = ms._world_tris(latex)
     sid, n = paint_mask.screen_ids(co, tris)
-    found = paint_mask.find_raised(co, tris, float(feature_mm) if feature_mm else None)
+    if int(nv) != n:
+        raise RuntimeError("The scan changed. Paint the area again.")
+    area = paint_mask.field_from_b64(field_b64, co, tris) < 0
+    found = paint_mask.find_raised(co, tris, float(feature_mm) if feature_mm else None, area=area)
     out = []
     ok = sid >= 0
     for f in found:
@@ -1996,7 +1999,7 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/paint_mask_save":
                 return self._send(200, job_mask_save(data["nv"], data.get("field") or "", data.get("name")))
             if p == "/api/mask_features":
-                return self._send(200, self._busy(job_mask_features, data.get("feature_mm")))
+                return self._send(200, self._busy(job_mask_features, data["nv"], data.get("field") or "", data.get("feature_mm")))
             if p == "/api/autosplit":
                 settings = load_settings()
                 settings.update({k: data.get("settings", {}).get(k, v) for k, v in settings.items()})

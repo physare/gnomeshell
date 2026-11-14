@@ -442,16 +442,7 @@
 
           <div class="mask-pane" data-in="mask">
             <div class="head-row h2help"><h2>Paint mask</h2><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="A thin cover that fits over the piece, with openings where the paint goes. Select the area to cover, subtract the openings (the eyes, say), and build it. Tape it on and spray through the openings.">?</span></div>
-            <p class="muted small" id="maskIntro">Find raised features picks out bumps like the eyes and puts the mask round them. To draw it yourself, pick Ellipse, Box or Free line and draw round the area with Add, then round each opening with Subtract. With no tool picked, dragging turns the view. With a tool picked, Shift+drag or the middle mouse button turns it; Esc puts the tool down.</p>
-            <button type="button" class="btn sm" id="maskFind" title="Looks for bumps that stand up from the surface round them, like eyes, and makes the mask round the ones you tick">Find raised features</button>
-            <div id="maskFeat" hidden>
-              <div id="maskFeatList" class="mask-feats"></div>
-              <div class="fields">
-                <label for="maskReach">Mask reaches (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="How far the mask goes past the edge of each opening.">?</span><input id="maskReach" type="number" step="1" min="2" max="80" value="12"></label>
-                <label for="maskMargin">Opening margin (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="How far past the raised feature's edge each opening goes. Above 0 sprays a little round it; below 0 keeps the paint inside it.">?</span><input id="maskMargin" type="number" step="0.25" min="-5" max="10" value="0.5"></label>
-                <label for="maskFeatSize">Feature size (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="About how wide the features to find are. Find again after changing it.">?</span><input id="maskFeatSize" type="number" step="1" min="2" max="200"></label>
-              </div>
-            </div>
+            <p class="muted small" id="maskIntro">First select the area to cover: pick Ellipse, Box or Free line and draw round it with Add. Then Cut out raised features makes the openings over the eyes, or draw round each opening yourself with Subtract. With no tool picked, dragging turns the view. With a tool picked, Shift+drag or the middle mouse button turns it; Esc puts the tool down.</p>
             <div class="seg four" role="group" aria-label="Draw with" id="maskTool">
               <button type="button" data-tool="ellipse" title="Drag an ellipse round the area. Shift after you start makes a circle. Click again or press Esc to put it down. (O)">Ellipse</button>
               <button type="button" data-tool="box" title="Drag a box round the area. Shift after you start makes a square. (X)">Box</button>
@@ -463,6 +454,14 @@
               <button type="button" data-brush="erase" title="Subtract from the mask: makes an opening (E)">Subtract</button>
             </div>
             <label class="slider" for="maskSize" id="maskSizeBox" hidden>Brush size<input id="maskSize" type="range" min="1" max="40" step="0.5" value="6"><span class="mono" id="maskSizeV">6 mm</span></label>
+            <button type="button" class="btn sm" id="maskFind" disabled title="Finds the parts that stand up inside the area you selected, like the eyes, and cuts them out of the mask as openings">Cut out raised features</button>
+            <div id="maskFeat" hidden>
+              <div id="maskFeatList" class="mask-feats"></div>
+              <div class="fields">
+                <label for="maskMargin">Opening margin (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="How far past the raised part's edge each opening goes. Above 0 sprays a little round it; below 0 keeps the paint inside it.">?</span><input id="maskMargin" type="number" step="0.25" min="-5" max="10" value="0.5"></label>
+                <label for="maskFeatSize">Feature size (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="About how wide the raised parts to find are. Press Cut out raised features again after changing it.">?</span><input id="maskFeatSize" type="number" step="1" min="2" max="200"></label>
+              </div>
+            </div>
             <div class="btn-grid">
               <button type="button" class="btn sm" id="maskFacing" title="Selects everything on the model that faces you now. Turn the view to face the side you want covered first.">Select facing side</button>
               <button type="button" class="btn sm" id="maskInvert" title="The selected area becomes unselected and the rest becomes selected">Invert selection</button>

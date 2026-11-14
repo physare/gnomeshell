@@ -378,15 +378,15 @@ USE
      scan back.
      Paint mask (Mask tab, or press 5): a thin cover that fits over the
      piece with openings to spray through, say to paint the eyes white
-     after the whole piece is gray. Turn the view to face the eyes and
-     press Find raised features: it finds the bumps that stand up from the
-     surface (eyes, ears, a snout), numbers them in the view and ticks the
-     two facing you most. Tick the ones to paint. The mask goes round them
-     out to Mask reaches (12 mm), with each opening Opening margin (0.5 mm)
-     past the feature's edge. Feature size sets how wide a bump to look for.
-     To draw it yourself, pick Ellipse, Box or Free line (Shift, pressed
-     after you start, makes a circle or a square), draw round the area with Add, then round each
-     opening with Subtract. Everything visible inside the outline changes,
+     after the whole piece is gray. First select the area to cover: pick
+     Ellipse, Box or Free line (Shift, pressed after you start, makes a
+     circle or a square) and draw round it with Add. Then press Cut out
+     raised features: it finds the parts that stand up inside that area
+     (the eyes), cuts each out as an opening and numbers it in the view.
+     Fill in puts one back. Opening margin (0.5 mm) is how far past the
+     raised edge each opening goes; Feature size sets how wide a part to
+     look for. Or draw round each opening yourself with Subtract.
+     Everything visible inside the outline changes,
      and the edge lands exactly on the line you drew, however coarse the
      scan. The Brush touches up by hand. With no tool picked, dragging
      turns the view; with one picked, Shift+drag or the middle mouse button
