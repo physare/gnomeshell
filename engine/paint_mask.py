@@ -222,6 +222,9 @@ def _taubin(P, tris, fixed, passes=4, lam=0.5, mu=-0.53):
     return P
 
 
+PINHOLE_MM = 12.0  # an opening with a shorter edge than this (about 4 mm across) is filled in
+
+
 def build(co, tris, field, thickness=1.2, gap=0.1, fine_edge=True, edge_mm=0.45, smooth=True):
     """The mask as a closed mesh: (verts, tris, info).
 
@@ -274,6 +277,27 @@ def build(co, tris, field, thickness=1.2, gap=0.1, fine_edge=True, edge_mm=0.45,
             longest[r] = (L, i)
     outer = {i for _, i in longest.values()}
     holes = [lp for i, lp in enumerate(loops) if i not in outer]
+    # pinholes (where a drawn outline grazed a hidden corner, say) are filled in:
+    # a fan of triangles from the middle of each
+    bset = {(int(a), int(b)) for a, b in bedges}
+    perim = lambda lp: float(np.linalg.norm(P[lp] - P[np.roll(lp, -1)], axis=1).sum())
+    pin = [lp for lp in holes if perim(lp) < PINHOLE_MM and (int(lp[-1]), int(lp[0])) in bset]
+    if pin:
+        holes = [lp for lp in holes if not any(lp is q for q in pin)]
+        addP, addN, addF, gone = [], [], [], set()
+        for lp in pin:
+            c = nv + len(addP)
+            addP.append(P[lp].mean(0))
+            n = N[lp].sum(0)
+            addN.append(n / (np.linalg.norm(n) or 1))
+            for a, b in zip(lp, np.roll(lp, -1)):
+                addF.append((int(b), int(a), c))
+                gone.add((int(a), int(b)))
+        P, N = np.vstack([P, addP]), np.vstack([N, addN])
+        patch = np.vstack([patch, np.array(addF, dtype=np.int64)])
+        bedges = np.array([e for e in bedges if (int(e[0]), int(e[1])) not in gone], dtype=np.int64).reshape(-1, 2)
+        comp = _components(patch, len(P))
+        nv = len(P)
     P = P.copy()
     if smooth:
         P = _taubin(P, patch, np.zeros(nv, dtype=bool))
