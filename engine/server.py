@@ -47,7 +47,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.16.7"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.16.8"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -91,6 +91,9 @@ DEFAULT_SETTINGS = {
     "mask_gap_mm": 0.1,
     "mask_fine_edge": True,
     "mask_smooth": True,
+    "mask_lip": True,
+    "mask_lip_mm": 6.0,
+    "mask_lip_t_mm": 1.6,
 }
 SHELL_STYLES = ("BOX", "CONTOUR")
 
@@ -112,6 +115,8 @@ LIMITS = {
     "seam_t_mm": ("Seam card thickness", 0.1, 5, False),
     "mask_t_mm": ("Paint mask thickness", 0.4, 10, False),
     "mask_gap_mm": ("Paint mask gap", -10, 5, False),
+    "mask_lip_mm": ("Tape lip height", 1, 40, False),
+    "mask_lip_t_mm": ("Tape lip thickness", 0.4, 10, False),
     "seam_w_mm": ("Seam card sticks out", 5, 300, False),
     "seam_gap_mm": ("Seam card gap", 0, 5, False),
     "seam_rim_w_mm": ("Stiff edge width", 0, 100, False),
@@ -1301,16 +1306,16 @@ def _mask_saved(latex):
         _, n = paint_mask.screen_ids(*ms._world_tris(latex))
     except Exception:
         return None
-    return {"nv": n, "field": m["field"]} if m.get("nv") == n else None
+    return {"nv": n, "field": m["field"], "splits": m.get("splits") or ""} if m.get("nv") == n else None
 
 
-def job_mask_save(nv, field, name=None):
+def job_mask_save(nv, field, name=None, splits=""):
     """Keep the chosen area with the scan, so it comes back next time."""
     folder = os.path.join(OUT_ROOT, safe_name(name)) if name else STATE["folder"]
     if not folder or not os.path.isdir(folder):
         return {}
     with open(os.path.join(folder, "paint_mask.json"), "w", encoding="utf-8") as f:
-        json.dump({"nv": int(nv), "field": field or ""}, f)
+        json.dump({"nv": int(nv), "field": field or "", "splits": splits or ""}, f)
     return {"saved": True}
 
 
@@ -1335,20 +1340,26 @@ def job_mask_features(nv, field_b64, feature_mm=None):
     return {"features": out, "nv": n}
 
 
-def job_paint_mask(nv, field_b64, settings):
+def job_paint_mask(nv, field_b64, settings, splits_b64=""):
     """Build the paint mask from the chosen area: saved as
     "<name> - paint mask.stl" and ".3mf" (dome up, ready to slice) in the scan's folder."""
     latex = _latex()
     t0 = time.time()
     progress("Making the paint mask")
     co, tris = ms._world_tris(latex)
-    field = paint_mask.field_from_b64(field_b64, co, tris)
+    _, n = paint_mask.screen_ids(co, tris)
+    if int(nv) != n:
+        raise RuntimeError("The scan changed. Paint the area again.")
+    co, tris = paint_mask.screen_mesh(co, tris, splits_b64)  # with the finer detail added round the mask's edge
+    field = paint_mask.field_from_list(field_b64, len(co))
     V, F, info = paint_mask.build(co, tris, field, thickness=float(settings["mask_t_mm"]), gap=float(settings["mask_gap_mm"]),
-                                  fine_edge=bool(settings.get("mask_fine_edge", True)), smooth=bool(settings.get("mask_smooth", True)))
-    job_mask_save(nv, field_b64)
+                                  fine_edge=bool(settings.get("mask_fine_edge", True)), smooth=bool(settings.get("mask_smooth", True)),
+                                  lip_mm=float(settings.get("mask_lip_mm", 6)) if settings.get("mask_lip", True) else 0,
+                                  lip_t_mm=float(settings.get("mask_lip_t_mm", 1.6)))
+    job_mask_save(nv, field_b64, splits=splits_b64)
     progress("Saving the paint mask")
     folder, name = STATE["folder"], STATE["name"] + " - paint mask"
-    M = paint_mask.print_pose(V, F)
+    M = paint_mask.print_pose(V, F, info.get("layer_corners"))
     P = V @ M[:3, :3].T + M[:3, 3]
     ms._write_stl(os.path.join(folder, name + ".stl"), P, F)
     ms.write_3mf(os.path.join(folder, name + ".3mf"), [("Paint mask", P, F)], settings["bed_mm"], arrange=True)
@@ -2018,9 +2029,9 @@ class Handler(BaseHTTPRequestHandler):
                 settings.update({k: data.get("settings", {}).get(k, v) for k, v in settings.items()})
                 check_settings(settings)
                 save_settings(settings)
-                return self._send(200, self._busy(job_paint_mask, data["nv"], data.get("field") or "", settings))
+                return self._send(200, self._busy(job_paint_mask, data["nv"], data.get("field") or "", settings, data.get("splits") or ""))
             if p == "/api/paint_mask_save":
-                return self._send(200, job_mask_save(data["nv"], data.get("field") or "", data.get("name")))
+                return self._send(200, job_mask_save(data["nv"], data.get("field") or "", data.get("name"), data.get("splits") or ""))
             if p == "/api/mask_features":
                 return self._send(200, self._busy(job_mask_features, data["nv"], data.get("field") or "", data.get("feature_mm")))
             if p == "/api/autosplit":

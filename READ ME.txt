@@ -400,7 +400,9 @@ USE
      look for. Or draw round each opening yourself with Subtract.
      Everything visible inside the outline changes,
      and the edge lands exactly on the line you drew, however coarse the
-     scan. The Brush touches up by hand. With no tool picked, dragging
+     scan. Where you paint, the mask adds finer detail near the edge (and
+     round the openings), so a small brush follows the line closely; the
+     brush goes from 0.2 mm to 40 mm. The Brush touches up by hand. With no tool picked, dragging
      turns the view; with one picked, Shift+drag or the middle mouse button
      does. Click the picked tool again or press Esc to put it down. Expand and Contract move the edge 1 mm. Ctrl+Z steps back, and
      Clear mask starts over (it also takes the built mask out of the view).
@@ -409,7 +411,9 @@ USE
      dome). Thickness is 1.2 mm and the gap off the model 0.1 mm, so it fits
      snug; round the openings it thins to a fine edge for a crisp paint
      line, and Smooth the surface keeps a low-detail scan's flat facets out
-     of it. Tape it on to spray. If the scan is of the latex mold rather
+     of it. Tape lip (on by default) stands a collar up round the outside
+     edge to tape onto: Lip height 6 mm and Lip thickness 1.6 mm. Tape it
+     on to spray. If the scan is of the latex mold rather
      than the piece, set the gap to minus the latex's thickness so the mask
      fits the cast. The mask area is kept with the scan.
      Esc, when there's nothing else for it to cancel, asks whether to close
