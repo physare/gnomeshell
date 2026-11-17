@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.17.2"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.17.3"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -3062,7 +3062,7 @@ async function fileMenu() {
     items.push("-");
     recent.forEach((x) => items.push({ label: x.name, act: () => openRecent(x.name) }));
   }
-  items.push("-", { label: "Show this scan's folder", disabled: !here, act: () => api("/api/open", { what: "folder", name: here }).catch((e) => toast(e.message)) });
+  items.push("-", { label: "Show this scan's folder", disabled: !here, act: () => openOut("folder", here) });
   items.push({ label: "Close tab", key: "Ctrl+W", disabled: TABS.active == null, act: () => askCloseTab(TABS.active) });
   openMenu(r.left, r.bottom + 2, items);
   $("#ctx").classList.add("file-menu");
@@ -3334,9 +3334,14 @@ $$("#doneTools [data-show]").forEach((b) => b.onclick = () => {
   else if (b.dataset.show === "plates") { groups.plates.visible = true; framePlates(); }
   else viewFrom("fit");
 });
-$("#openBambu").onclick = () => api("/api/open", { what: "bambu", name: S.build?.name || S.scan?.name }).catch((e) => toast(e.message));
-$("#openSlices").onclick = () => api("/api/open", { what: "slices", name: S.build?.name || S.scan?.name }).catch((e) => toast(e.message));
-$("#openFolder").onclick = () => api("/api/open", { what: "folder", name: S.build?.name || S.scan?.name }).catch((e) => toast(e.message));
+// The window comes to the front by itself once it shows; Bambu Studio can take a few seconds to start.
+function openOut(what, name) {
+  toast(what === "folder" ? "Opening the folder..." : "Opening in Bambu Studio...", true, 4000);
+  return api("/api/open", name === undefined ? { what } : { what, name }).catch((e) => toast(e.message));
+}
+$("#openBambu").onclick = () => openOut("bambu", S.build?.name || S.scan?.name);
+$("#openSlices").onclick = () => openOut("slices", S.build?.name || S.scan?.name);
+$("#openFolder").onclick = () => openOut("folder", S.build?.name || S.scan?.name);
 $("#backCuts").onclick = () => go("cut");
 
 // ------------------------------------------------------------ busy + toast
@@ -4389,8 +4394,8 @@ try {
 } catch (e) { /* no storage */ }
 $("#maskColors").onchange = maskLook;
 $("#maskDetail").onchange = maskLook;
-$("#maskOpen").onclick = () => api("/api/open", { what: "mask" }).catch((e) => toast(e.message));
-$("#maskFolder").onclick = () => api("/api/open", { what: "folder" }).catch((e) => toast(e.message));
+$("#maskOpen").onclick = () => openOut("mask");
+$("#maskFolder").onclick = () => openOut("folder");
 
 // ------------------------------------------------------------ start
 (async function start() {
