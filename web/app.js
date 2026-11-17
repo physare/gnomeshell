@@ -1675,7 +1675,8 @@ function fillSettings() {
   set("#sumPour", +ss.pour_extend_mm ? `${ss.pour_extend_mm} mm` : "off");
   set("#sumShell", hug ? `contour shell · ${+ss.contour_mm} mm` : `box · ${+ss.wall_mm} mm wall`);
   set("#sumChan", hug ? `Ø${ss.hole_d_mm} mm cord · notches every ${+ss.notch_gap_mm} mm` : +ss.holes_per_corner ? `Ø${ss.hole_d_mm} mm · ${ss.holes_per_corner}/corner${ss.channel_pairs ? " · pairs" : ""}` : "none");
-  set("#sumSlice", `${ss.test_slice_style === "VERTICAL" ? "upright" : "level"} · ${ss.test_slice_mm} mm`);
+  set("#sumSlice", `${ss.test_slice_style === "VERTICAL" ? "upright" : "level"} · ${ss.test_slice_mm} mm${ss.test_slice_whole ? " · one piece" : ""}`);
+  set("#sumPrint", String(ss.gnomework_token || "").trim() ? "GnomeWork linked" : "not linked");
   set("#sumPrinter", `${ss.bed_mm} × ${ss.bed_d_mm ?? ss.bed_mm} × ${ss.bed_h_mm} mm`);
   const p = `${S.settings.bed_mm},${S.settings.bed_d_mm ?? S.settings.bed_mm},${S.settings.bed_h_mm}`;
   $("#plate").value = [...$("#plate").options].some((o) => o.value === p) ? p : "custom";
@@ -3142,12 +3143,16 @@ $("#phoneDetail").onchange = (e) => api("/api/phone/settings", { detail: e.targe
 setInterval(() => { if (S.step === "load" && !document.hidden) loadPhone(); }, 3000);
 
 // ------------------------------------------------------------ build
-function startBuild(slicesOnly) {
+function startBuild(slicesOnly, send) {
   if (!S.cuts.length || !S.T) { toast("Add at least one cut first."); return; }
   if (S.scan && !S.scan.watertight) { toast($("#scanWarnText").textContent); showTab("scan"); return; }
   const T = S.T;
   if (T.locked.length) { toast(`Pieces ${T.locked.map((i) => i + 1).join(", ")} can't come off as set. Change one of their arrows first.`); return; }
   if (!slicesOnly && insPokes()) return;
+  if (send && !String(S.settings.gnomework_token || "").trim()) {
+    toast("Paste the GnomeWork token under Settings, Printing first. GnomeWork makes it with php artisan gnomeshell:token.");
+    showTab("settings"); return;
+  }
   // every line between two pieces, so channels that a line would cut get skipped
   const byId = new Map(T.cells.map((L) => [L.id, L]));
   const cuts = [];
@@ -3162,7 +3167,7 @@ function startBuild(slicesOnly) {
   const pieces = T.pieces.map((P, i) => ({ id: P.id, ...pieceSpec(T, P), pull: T.pull[i].toArray(), order: T.order[i], slice: planJSON(plans[i]) }));
   // it goes in the engine's queue and builds in the background; buildFinished() shows it when it's done
   const tab = tabNow();
-  api("/api/build", { cuts, pieces, frame: [T.frame.ex.toArray(), T.frame.ey.toArray()], settings: S.settings, slices_only: !!slicesOnly, insert: slicesOnly ? null : insSpec(), seam_cards: slicesOnly ? [] : SEAM.cards })
+  api("/api/build", { cuts, pieces, frame: [T.frame.ex.toArray(), T.frame.ey.toArray()], settings: S.settings, slices_only: !!slicesOnly, send: !!send, insert: slicesOnly ? null : insSpec(), seam_cards: slicesOnly ? [] : SEAM.cards })
     .then((j) => {
       if (tab) { tab.job = j; tab.unseen = false; }
       renderTabs(); pollBuilds();
@@ -3172,6 +3177,7 @@ function startBuild(slicesOnly) {
 }
 $("#build").onclick = () => startBuild(false);
 $("#buildSlices").onclick = () => startBuild(true);
+$("#sendSlices").onclick = () => startBuild(true, true);
 $("#buildNow").onclick = () => { go("cut"); startBuild(false); };
 
 async function showBuild(res) {
@@ -3341,9 +3347,9 @@ async function withBusy(title, fn, poll) {
   try { await fn(); } catch (e) { toast(e.message); } finally { clearInterval(pollT); $("#busy").hidden = true; }
 }
 let toastT = null;
-function toast(msg, good) {
+function toast(msg, good, ms = 6000) {
   const t = $("#toast"); t.textContent = msg; t.className = "toast" + (good ? " good" : ""); t.hidden = false;
-  clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 6000);
+  clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), ms);
 }
 
 // ------------------------------------------------------------ app window
@@ -3500,14 +3506,14 @@ async function unstashTab(t, info) {
   }
   drawSizer();
   // a build that finished while you were away shows first
-  const fresh = t.unseen && t.job && t.job.state === "done" ? t.job.result : null;
+  const fresh = t.unseen && t.job && t.job.state === "done" && !t.job.send ? t.job.result : null;
   const res = fresh || (u && u.build) || null;
   if (res) { S.build = res; setShow(fresh ? (res.slices_only ? "latex" : "shell") : u.show || "shell"); await showBuild(res); }
   const step = fresh ? "done" : u && u.step !== "load" && !(u.step === "done" && !res) ? u.step : "cut";
   go(step);
   if (u && !fresh) { camera.position.fromArray(u.cam[0]); orbit.target.fromArray(u.cam[1]); orbit.update(); }
   else viewFrom("fit");
-  if (t.unseen && t.job && t.job.state === "failed") toast(`The last build of ${t.name} didn't finish: ${t.job.error}`);
+  if (t.unseen && t.job && t.job.state === "failed") toast(t.job.send ? `Sending ${t.name}'s test slices didn't finish: ${t.job.error}` : `The last build of ${t.name} didn't finish: ${t.job.error}`);
   t.unseen = false;
 }
 function showBlank() { // a new tab: the Load scan screen
@@ -3665,9 +3671,9 @@ function buildBar() {
   const on = st === "running" || st === "queued";
   $("#buildBar").hidden = !on;
   if (!on) return;
-  const what = j.slices_only ? "test slices" : "shell";
+  const what = j.send ? "test slices for the printer" : j.slices_only ? "test slices" : "shell";
   $("#buildBar").classList.toggle("queued", st === "queued");
-  $("#bbTitle").textContent = st === "running" ? (j.slices_only ? "Cutting the test slices…" : "Building the shell…") :
+  $("#bbTitle").textContent = st === "running" ? (j.send ? "Sending the test slices…" : j.slices_only ? "Cutting the test slices…" : "Building the shell…") :
     `Waiting to build the ${what}: ${j.place === 1 ? "1 build" : `${j.place} builds`} ahead`;
   $("#bbSub").textContent = st === "running" ? (j.progress || "") + " · you can keep working, or open another tab" : "It starts by itself when the one before it is done.";
   $("#bbStop").textContent = st === "running" ? "Stop" : "Take it out";
@@ -3698,11 +3704,23 @@ async function pollBuilds() {
 async function buildFinished(t) {
   const j = t.job, here = t.key === TABS.active && S.scan && S.scan.name === t.name && !busyNow();
   if (j.state === "failed") {
+    if (j.send) { toast(`${t.name}: the test slices weren't sent. ${j.error}`, false, 15000); return; }
     if (here) toast(j.error); else { t.unseen = true; toast(`${t.name}: the build didn't finish. ${j.error}`); }
     return;
   }
+  if (j.send) { toast(sentText(t.name, j.result.send), true, 20000); return; }
   if (!here) { t.unseen = true; toast(`${t.name} is ${j.slices_only ? "sliced" : "built"}. Its tab has it.`, true); return; }
   S.build = j.result; setShow(j.result.slices_only ? "latex" : "shell"); await showBuild(j.result); go("done"); viewFrom("fit");
+}
+// what Send test slices did, in words
+function sentText(name, r) {
+  if (!r) return `${name}: the test slices were sent.`;
+  const sizes = r.sizes.map((x) => `${x}`).join(" and ") + " mm";
+  const n = r.prints.length;
+  const where = n > 1 ? `${n} prints in ${r.printer}'s queue (they didn't fit on one plate)` : `${r.printer}'s queue`;
+  const next = r.ready ? `${r.printer} is free: press Start in GnomeWork's Print Queue and tick Bed is clear.`
+    : `It waits its turn${r.prints[0]?.ahead ? ` behind ${r.prints[0].ahead} print${r.prints[0].ahead === 1 ? "" : "s"}` : ""}. Start it in GnomeWork when ${r.printer} is free.`;
+  return `${name}: test slices ${sizes} are in ${where}. ${next}`;
 }
 // the tabs you had open come back when GnomeShell starts
 async function startTabs() {

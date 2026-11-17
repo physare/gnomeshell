@@ -28,9 +28,11 @@ What it does, in order:
      From Python you can also pass `pieces`: each piece is the part of the box
      on the kept side of its own list of planes, so a cut can split just one
      piece (a level cut across the middle columns only, say).
-     Each piece also gets a fit-test slice (SHELL_n_TEST): a 0.4 mm (2 layer)
+     Each piece also gets a fit-test slice (SHELL_n_TEST): a 0.56 mm (2 layer)
      upright slice across the seam through the tallest point of the latex,
-     exported lying flat, to print first and check the fit.
+     exported lying flat, to print first and check the fit. A test slice is
+     always a contour skin round the latex (test_slice_band times Contour
+     thickness wide), and by default one piece (SHELL_WHOLE_TEST).
   4. Export Files: an STL per piece and per test slice, plus shell.3mf
      (pieces assembled) and test_slices.3mf, all in millimetres.
 
@@ -64,7 +66,9 @@ DEFAULTS = dict(
     max_tilt_deg=30.0,
     pour_extend_mm=0.0,         # carry the base opening down this far for a pour collar
     pour_flare_deg=0.0,         # flare the collar outward like a funnel
-    test_slice_mm=0.4,          # fit-test slice thickness: 2 layers at 0.2 mm
+    test_slice_mm=0.56,         # fit-test slice thickness: 2 layers at 0.28 mm
+    test_slice_band=3.0,        # the slice is a contour skin this many times Contour thickness wide, whatever the shell style
+    test_slice_whole=True,      # one slice in one piece, ignoring the cuts
     test_slice_at=0.5,          # HORIZONTAL style only: height of the slice as a fraction of the shell
     test_slice_style="VERTICAL",  # VERTICAL: upright slice across the seam through the top of the latex
     bed_mm=256.0,               # build plate size used to centre the 3MF
@@ -2190,29 +2194,99 @@ def build_shell(latex_obj, auto_cut=True, test_slices=True, cuts=None, pieces=No
     return out, report
 
 
-def build_test_slices(latex_obj, cuts=None, pieces=None, frame=None, **params):
-    """Only the fit-test slices, without the shell. The box is trimmed to each
-    slice before the latex is carved out of it, so this takes a fraction of a
-    full build, and the slices come out the same as build_shell's.
+def _carve_fit(ctx, clip, band_mm, name="ms_tmp_fit"):
+    """A test slice's worth of contour skin: the latex near the slice grown by
+    band_mm all round (the contour shell's own offset), trimmed to the slab
+    clip=(centre, normal, thickness) and flat at the bottom where the shell
+    stops, with the latex carved out exactly. Used whatever the shell style,
+    so a slice is a band round the latex rather than a slice of the box."""
+    pt, n, t = Vector(clip[0]), Vector(clip[1]).normalized(), clip[2]
+    mm = ctx["mm"]
+    T = band_mm * mm
+    d = pt.dot(n)
+    work = ctx["work"]
+    # only the latex within reach of the slab can shape it
+    reach = _band(work, n, d, T + t / 2 + 2.0 * mm, name="ms_tmp_reach")
+    src = reach or work
+    co, _ = _world_tris(src)
+    span = float(np.ptp(co, axis=0).max())
+    voxel = max(0.15 * mm, min(T / 10.0, span / 600.0))
+    skin = _offset_solid(src, T, voxel, name)
+    if reach is not None:
+        _remove(reach)
+    x0, y0, z0, x1, y1, z1 = ctx["box"]
+    big = max(x1 - x0, y1 - y0, z1 - z0) * 4 + 4 * T + 10 * mm
+    slab = _slab(pt, n, t, big)
+    _fast_bool(skin, slab, "INTERSECT")
+    _remove(slab)
+    if not len(skin.data.polygons):
+        return skin
+    # flat at the bottom, where the shell's own floor gap leaves the latex open
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.0)
+    pad = T + 20 * mm
+    for v in bm.verts:
+        v.co = Vector((x0 - pad if v.co.x < 0 else x1 + pad, y0 - pad if v.co.y < 0 else y1 + pad,
+                       z0 if v.co.z < 0 else z1 + pad))
+    floor = _new_obj("ms_tmp_floor", bm, matrix=ctx["frame4"])
+    _fast_bool(skin, floor, "INTERSECT")
+    _remove(floor)
+    if not len(skin.data.polygons):
+        return skin
+    band = _band(work, n, d, t / 2 + 2.0 * mm)
+    _apply_booleans(skin, [band or work], "DIFFERENCE")
+    if band is not None:
+        _remove(band)
+    bm = bmesh.new()
+    bm.from_mesh(skin.data)
+    bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method="BEAUTY", ngon_method="BEAUTY")
+    if bm.verts:
+        bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=span * 1e-6)
+    _remove_doubled_faces(bm)
+    bm.to_mesh(skin.data)
+    bm.free()
+    return skin
 
-    cuts, pieces, frame: as for build_shell. Every piece needs its "slice"
-    plan ({"point", "normal", "alt"}). Pieces whose slices lie in the same
-    plane share one carve. Returns the slice objects (SHELL_n_TEST, n being
-    the piece's number) and a report."""
+
+WHOLE = "WHOLE"  # the name of a test slice made in one piece: SHELL_WHOLE_TEST
+
+
+def build_test_slices(latex_obj, cuts=None, pieces=None, frame=None, clear=True, **params):
+    """Only the fit-test slices, without the shell.
+
+    A test slice is always a contour skin round the latex, test_slice_band
+    times Contour thickness wide and test_slice_mm thick, whatever the shell
+    style: it checks the fit of the latex, not the box. With test_slice_whole
+    (the default) it is one piece, SHELL_WHOLE_TEST, ignoring the cuts;
+    otherwise each piece the slice crosses gets its own part of it.
+
+    cuts, pieces, frame: as for build_shell. A piece's "slice" plan
+    ({"point", "normal", "alt"}) says where the slice goes. Pieces whose slices
+    lie in the same plane share one carve. clear=False keeps the shell
+    pieces already built (only old test slices go). Returns the slice objects
+    (SHELL_n_TEST, n being the piece's number) and a report."""
     p = dict(DEFAULTS)
     p.update({k: v for k, v in params.items() if v is not None})
     report = {"skipped_channels": 0}
-    if not pieces:
+    whole = bool(p.get("test_slice_whole", True))
+    if not pieces and not whole:
         raise RuntimeError("Add at least one cut first.")
+    pieces = pieces or [{"id": WHOLE, "slice": p.get("slice") or {}}]
     cuts = cuts or []
     planes = [(Vector(c[0]), Vector(c[1]).normalized(), None) for c in cuts]
-    for o in [o for o in bpy.data.objects if o.name.startswith((PIECE_PREFIX, "ms_tmp", "POUR_PREVIEW"))]:
+    for o in [o for o in bpy.data.objects if o.name.startswith(("ms_tmp", "POUR_PREVIEW"))
+              or (o.name.startswith(PIECE_PREFIX) and (clear or o.name.endswith(TEST_SUFFIX)))]:
         _remove(o)
-    ctx = _shell_setup(latex_obj, p, planes, cuts, frame, report)
+    # the box's frame and floor, with no channels and no contour shell: the slice makes its own skin
+    q = dict(p, shell_style="BOX", holes_per_corner=0, insert=None)
+    ctx = _shell_setup(latex_obj, q, planes, cuts, frame, report)
+    report.pop("channels", None)
     mm, wall, R, work = ctx["mm"], ctx["wall"], ctx["R"], ctx["work"]
     report["units_per_mm"] = mm
     t = p["test_slice_mm"] * mm
-    lo_w, hi_w = _world_box(ctx, 10 * wall + 1.0)
+    T = p["test_slice_band"] * p["contour_mm"]
+    report["test_slice_band_mm"] = round(T, 2)
+    lo_w, hi_w = _world_box(ctx, 10 * wall + T * mm + 1.0)
     min_vol = wall * wall * t * 0.01
 
     def plane_of(k, use_alt):
@@ -2223,9 +2297,22 @@ def build_test_slices(latex_obj, cuts=None, pieces=None, frame=None, **params):
 
     got = {}
     carves = {"done": 0}
-    # the app plans one slice for the whole mold, on one piece; the rest have none
-    todo = [(k, False) for k in range(len(pieces)) if (pieces[k].get("slice") or {}).get("point")] or \
-        [(k, False) for k in range(len(pieces))]
+    if whole:
+        # one slice where the app planned it (the first piece that has a plan)
+        k0 = next((k for k in range(len(pieces)) if (pieces[k].get("slice") or {}).get("point")), 0)
+        pt, n = plane_of(k0, False)
+        if callable(on_plane):
+            on_plane(1, 1)
+        shell = _carve_fit(ctx, (pt, n, t), T)
+        if len(shell.data.polygons):
+            got[k0] = ((shell, []), n, (pieces[k0].get("slice") or {}).get("why", ""))
+        else:
+            _remove(shell)
+        todo = []
+    else:
+        # the app plans one slice for the whole mold, on one piece; the rest have none
+        todo = [(k, False) for k in range(len(pieces)) if (pieces[k].get("slice") or {}).get("point")] or \
+            [(k, False) for k in range(len(pieces))]
     step, steps = 0, len(todo)
     while todo:
         # the pieces whose slices lie in one plane are carved together
@@ -2240,7 +2327,7 @@ def build_test_slices(latex_obj, cuts=None, pieces=None, frame=None, **params):
             carves["done"] += 1
             if callable(on_plane):
                 on_plane(carves["done"], round_total)
-            shell = _carve(ctx, (pt, n, t))
+            shell = _carve_fit(ctx, (pt, n, t), T)
             for k in ks:
                 step += 1
                 if callable(on_piece):
@@ -2281,7 +2368,8 @@ def build_test_slices(latex_obj, cuts=None, pieces=None, frame=None, **params):
         pull = Vector(spec.get("pull") or (0, 0, 0))
         if pull.length < 1e-6:
             pull = sum((h for _, h in hs), Vector((0, 0, 0)))
-        sl.name = sl.data.name = f"{PIECE_PREFIX}{k + 1}{TEST_SUFFIX}"
+        tag = WHOLE if whole else str(k + 1)
+        sl.name = sl.data.name = f"{PIECE_PREFIX}{tag}{TEST_SUFFIX}"
         sl["piece_id"] = str(spec.get("id", k))
         sl["order"] = int(spec.get("order", 0))
         sl["pull_direction"] = tuple(pull.normalized()) if pull.length else (0, 0, 0)
@@ -2294,6 +2382,147 @@ def build_test_slices(latex_obj, cuts=None, pieces=None, frame=None, **params):
     bpy.context.scene["mold_shell_units_per_mm"] = mm
     print("[mold shell] slices only", report)
     return out, report
+
+
+# --------------------------------------------------- sizes and labels for test prints
+
+def slice_section_width(latex_obj, point, normal):
+    """How wide the latex is where a test slice crosses it, in scene units:
+    across the slice, level (for an upright slice) or along the box (for a
+    level one). None if the plane misses it. This is the size cut into the
+    slice and the size a second test size grows."""
+    n = Vector(normal).normalized()
+    band = _band(latex_obj, n, Vector(point).dot(n), 1e-3, name="ms_tmp_section")
+    if band is None:
+        co, _ = _world_tris(latex_obj)
+        nn = np.array(n)
+        co = co[np.abs(co @ nn - Vector(point).dot(n)) < 0.5]
+    else:
+        co, _ = _world_tris(band)
+        _remove(band)
+    if len(co) < 3:
+        return None
+    e1 = _section_axis(n)
+    return float(np.ptp(co @ np.array(e1)))
+
+
+def _section_axis(n, frame_ex=(1, 0, 0)):
+    """The level direction across a slice (e1 of test_flat_basis)."""
+    return test_flat_basis({"flat_normal": tuple(n), "frame_ex": tuple(frame_ex)})[:, 0]
+
+
+def scale_about_section(latex_obj, point, normal, factor):
+    """Grow (or shrink) the latex evenly by factor about the bottom middle of
+    its section through the slice, so the slice still cuts the same place and
+    the bottom stays put. Returns the old matrix, to put it back."""
+    n = Vector(normal).normalized()
+    co, _ = _world_tris(latex_obj)
+    near = co[np.abs(co @ np.array(n) - Vector(point).dot(n)) < max(1.0, float(np.ptp(co, axis=0).max()) / 50)]
+    if not len(near):
+        near = co
+    B = test_flat_basis({"flat_normal": tuple(n), "frame_ex": (1, 0, 0)})
+    e1, e2 = B[:, 0], B[:, 1]
+    mid = float((near @ e1).min() + np.ptp(near @ e1) / 2)
+    pt = np.array(point, float)
+    anchor = pt + e1 * (mid - pt.dot(e1))
+    if abs(e2[2]) > 0.5:  # an upright slice: anchor at the bottom of the latex, in the slice's plane
+        anchor = anchor + e2 * ((float(co[:, 2].min()) - anchor[2]) / e2[2])
+    anchor = Vector(anchor)
+    old = latex_obj.matrix_world.copy()
+    latex_obj.matrix_world = Matrix.Translation(anchor) @ Matrix.Scale(factor, 4) @ Matrix.Translation(-anchor) @ old
+    bpy.context.view_layer.update()
+    return old
+
+
+def engrave_label(obj, text, depth, size_mm=5.0, margin_mm=1.0, mm=1.0):
+    """Cut `text` (say "84") into the top of a test slice, `depth` deep, where
+    it fits inside the plastic. The top is the side its flat_normal points to,
+    the side that faces up when it prints. Tries smaller text if it doesn't
+    fit. Returns the text height used in mm, or None if no spot was found."""
+    from mathutils.bvhtree import BVHTree as _BVH
+    B = test_flat_basis(obj)
+    e1, e2, e3 = (Vector(B[:, i]) for i in range(3))
+    co, tris = _world_tris(obj)
+    if not len(tris):
+        return None
+    bvh = _BVH.FromPolygons([tuple(v) for v in co], [tuple(t) for t in tris])
+    u, v, w = co @ B[:, 0], co @ B[:, 1], co @ B[:, 2]
+    top = float(w.max())
+    g = 0.4 * mm
+    us = np.arange(u.min() + g / 2, u.max(), g)
+    vs = np.arange(v.min() + g / 2, v.max(), g)
+    mask = np.zeros((len(vs), len(us)), bool)
+    for j, vv in enumerate(vs):
+        for i, uu in enumerate(us):
+            o = e1 * float(uu) + e2 * float(vv) + e3 * (top + 1.0 * mm)
+            hit = bvh.ray_cast(o, -e3, 2.0 * mm + (top - float(w.min())))
+            mask[j, i] = hit[0] is not None and hit[3] < 1.0 * mm + depth * 0.5
+    ii = np.zeros((mask.shape[0] + 1, mask.shape[1] + 1))
+    ii[1:, 1:] = mask.cumsum(0).cumsum(1)
+
+    def fits(hc, wc):
+        """Where a box hc rows by wc columns is all plastic: its top-left cells."""
+        if hc > mask.shape[0] or wc > mask.shape[1]:
+            return np.zeros((0, 2), int)
+        tot = ii[hc:, wc:] - ii[:-hc, wc:] - ii[hc:, :-wc] + ii[:-hc, :-wc]
+        return np.argwhere(tot >= hc * wc - 0.5)
+
+    for size in (size_mm, size_mm * 0.8, size_mm * 0.6):
+        txt, (tw, th) = _text_mesh(text, size * mm, depth + 1.0 * mm)
+        # the roomiest spot first: a wide margin all round, then narrower
+        for turn, m in [(tn, m) for m in (3 * margin_mm, 2 * margin_mm, margin_mm) for tn in (0, 90)]:
+            w_, h_ = (tw, th) if turn == 0 else (th, tw)
+            hc, wc = int(math.ceil((h_ + 2 * m * mm) / g)), int(math.ceil((w_ + 2 * m * mm) / g))
+            ok = fits(hc, wc)
+            if not len(ok):
+                continue
+            centres = np.stack([vs[0] + (ok[:, 0] + hc / 2 - 0.5) * g, us[0] + (ok[:, 1] + wc / 2 - 0.5) * g], 1)
+            c = centres[np.argmin(((centres - centres.mean(0)) ** 2).sum(1))]
+            rot = Matrix.Rotation(math.radians(turn), 4, "Z")
+            basis = Matrix((e1, e2, e3)).transposed().to_4x4()
+            at = e1 * float(c[1]) + e2 * float(c[0]) + e3 * (top - depth + (depth + 1.0 * mm) / 2)
+            txt.matrix_world = Matrix.Translation(at) @ basis @ rot
+            bpy.context.view_layer.update()
+            _apply_booleans(obj, [txt], "DIFFERENCE")
+            _remove(txt)
+            return round(size, 2)
+        _remove(txt)
+    return None
+
+
+def _text_mesh(text, height, depth):
+    """Bold-ish digits as a closed mesh, `height` tall (the digits themselves),
+    `depth` thick, centred on the origin. Returns the object and its (w, h)."""
+    cu = bpy.data.curves.new("ms_tmp_label", "FONT")
+    cu.body = str(text)
+    cu.align_x, cu.align_y = "CENTER", "CENTER"
+    cu.size = 1.0
+    cu.offset = 0.06  # a little bolder, so the strokes print with a 0.4 mm nozzle
+    cu.extrude = 0.5
+    cu.resolution_u = 6
+    tmp = bpy.data.objects.new("ms_tmp_label", cu)
+    _collection().objects.link(tmp)
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    me = bpy.data.meshes.new_from_object(tmp.evaluated_get(dg))
+    bpy.data.objects.remove(tmp)
+    bpy.data.curves.remove(cu)
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bpy.data.meshes.remove(me)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=1e-5)
+    xs = [v.co.x for v in bm.verts]
+    ys = [v.co.y for v in bm.verts]
+    zs = [v.co.z for v in bm.verts]
+    k = height / max(1e-6, max(ys) - min(ys))
+    cx, cy, cz = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2, (max(zs) + min(zs)) / 2
+    sz = depth / max(1e-6, max(zs) - min(zs))
+    for vv in bm.verts:
+        vv.co = Vector(((vv.co.x - cx) * k, (vv.co.y - cy) * k, (vv.co.z - cz) * sz))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    w = (max(xs) - min(xs)) * k
+    obj = _new_obj("ms_tmp_label", bm)
+    return obj, (w, height)
 
 
 # --------------------------------------------------- fit-test slices

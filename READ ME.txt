@@ -258,9 +258,13 @@ USE
          the number of pieces set under Printer & cutting and never below
          Smallest piece. What it adds are normal cuts you can move or delete.
        - Pour collar: carries the base opening down so you have room to pour.
-       - Test slice: one slice through the whole mold. Every piece it
-         crosses gets its own slice there, so together they go all the way
-         round the model. Pink in the view shows where it's cut, with a line
+       - Test slice: one slice through the whole mold, 0.56 mm thick (two
+         0.28 mm layers). It's always a band round the latex shaped like the
+         Contour shell, Width (3 by default) times Contour thickness wide,
+         even when the shell style is Box: it checks the fit on the latex,
+         not the box. "One piece (ignore the cuts)" (on by default) makes it
+         one whole slice; untick it and every piece it crosses gets its own
+         part of it. Pink in the view shows where it's cut, with a line
          where it meets the latex (untick Test slices in the Show menu at
          the top to hide it). Upright: across the main seam through the
          tallest point of the latex. Level: Level slice height up the shell,
@@ -345,6 +349,25 @@ USE
      Stop (or Take it out, while it's waiting). A build uses the scan and
      cuts as they were when you pressed Build, so changing them after
      doesn't change that build.
+  2b. Send test slices to a printer (Prepare & cut, over the build
+     buttons): makes the test slice in two sizes, the scan as it is and
+     Second size (2 mm by default) wider across the cut-out, with each
+     one's size in mm cut into its top layer (say "84" and "86"). GnomeShell
+     asks GnomeWork which printers are free, slices them in Bambu Studio for
+     that printer (its own profiles, so its own start-up and bed levelling)
+     and puts them in that printer's queue in GnomeWork. Both go on one
+     plate if they fit, otherwise one after the other. If no printer is
+     free, the one with the shortest queue gets them. Nothing starts by
+     itself: press Start in GnomeWork's Print Queue and tick Bed is clear.
+     A copy of each file is kept in the scan's "test prints" folder.
+     Set it up once under Settings, Printing:
+       - GnomeWork token: in GnomeWork's folder, run
+         php artisan gnomeshell:token --user=<your email>
+         and paste what it prints. It only lets GnomeShell see the printers
+         and add to their queues.
+       - Bambu Studio program: leave empty to find it where it installs.
+       - Filament: the start of a Bambu Studio filament profile's name
+         (Bambu PLA Basic).
   3. Test slices only cuts just the slices, in a fraction of the time, so
      you can check the fit before printing the shell. They're exactly the
      slices the full build makes. It clears the scan's folder first, so an

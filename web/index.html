@@ -565,11 +565,26 @@
                 <button type="button" data-style="HORIZONTAL">Level</button>
               </div>
               <div class="fields">
-                <label for="test_slice_mm">Thickness (mm)<input id="test_slice_mm" data-set type="number" step="0.1" min="0.1" max="20"></label>
+                <label for="test_slice_mm" title="Two layers: 0.56 mm prints as 2 layers of 0.28 mm">Thickness (mm)<input id="test_slice_mm" data-set type="number" step="0.01" min="0.1" max="20"></label>
                 <label for="test_slice_at" title="How far up the piece a level test slice is cut">Level slice height (%)<input id="test_slice_at" data-set data-pct type="number" step="5" min="5" max="95"></label>
+                <label for="test_slice_band" title="A test slice is a band round the latex shaped like the contour shell, whatever the shell style. This many times Contour thickness wide.">Width (× contour)<input id="test_slice_band" data-set type="number" step="0.5" min="1" max="10"></label>
+                <label for="test_size_step_mm" title="Send test slices prints two sizes: the scan as it is, and this many mm wider across the cut-out. Each has its size cut into it. Negative for smaller.">Second size (mm)<input id="test_size_step_mm" data-set type="number" step="0.5" min="-20" max="20"></label>
+                <label class="check" for="test_slice_whole" title="One slice in one piece, ignoring the cuts. Untick to get a piece of slice for each shell piece it crosses."><input id="test_slice_whole" data-set type="checkbox"> One piece (ignore the cuts)</label>
               </div>
               <p class="muted small" id="sliceNote"></p>
               <button type="button" class="btn sm" id="sliceReset" hidden>Put the slice back where it starts</button>
+            </div>
+          </details>
+
+          <details class="group" data-in="settings">
+            <summary><span>Printing</span><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="Send test slices asks GnomeWork which printers are free, slices the test slices in Bambu Studio for that printer and puts them in its queue (or the shortest queue if none is free). Nothing starts by itself: press Start in GnomeWork's Print Queue and tick Bed is clear. The GnomeWork token comes from php artisan gnomeshell:token.">?</span><span class="sum-meta mono" id="sumPrint"></span></summary>
+            <div class="group-body">
+              <div class="fields">
+                <label class="stack" for="gnomework_url">GnomeWork address<input id="gnomework_url" data-set type="url" spellcheck="false" autocomplete="off"></label>
+                <label class="stack" for="gnomework_token">GnomeWork token<input id="gnomework_token" data-set type="password" spellcheck="false" autocomplete="off" placeholder="Paste the token GnomeWork made"></label>
+                <label class="stack" for="bambu_path" title="Leave empty to find it where it installs">Bambu Studio program<input id="bambu_path" data-set type="text" spellcheck="false" autocomplete="off" placeholder="Found by itself"></label>
+                <label class="stack" for="print_filament" title="The start of a Bambu Studio filament profile's name">Filament<input id="print_filament" data-set type="text" spellcheck="false" autocomplete="off"></label>
+              </div>
             </div>
           </details>
 
@@ -607,6 +622,7 @@
         </div>
         <div class="foot">
           <div class="estimate" id="estimate"></div>
+          <button type="button" class="btn wide" id="sendSlices" title="Two sizes of test slice, each with its size cut into it, sliced in Bambu Studio and put in a free printer's queue in GnomeWork">Send test slices to a printer</button>
           <div class="build-row">
             <button type="button" class="btn wide" id="buildSlices" title="Cut just the test slices, so you can check the fit before building the whole shell">Test slices only</button>
             <button type="button" class="btn primary wide" id="build">Build shell</button>

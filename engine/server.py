@@ -41,13 +41,15 @@ import photoscan  # noqa: E402
 import marker_sheet  # noqa: E402
 import cleanup as scanclean  # noqa: E402
 import paint_mask  # noqa: E402
+import bambu  # noqa: E402
+import gnomework as gw  # noqa: E402
 
 HOME_DOCS = os.path.join(os.path.expanduser("~"), "Documents")
 OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expanduser("~"), "Mold Shells")
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.16.9"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.17.0"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -60,6 +62,14 @@ DEFAULT_SETTINGS = {
     "test_slice_mm": ms.DEFAULTS["test_slice_mm"],
     "test_slice_style": ms.DEFAULTS["test_slice_style"],
     "test_slice_at": ms.DEFAULTS["test_slice_at"],
+    "test_slice_band": ms.DEFAULTS["test_slice_band"],
+    "test_slice_whole": ms.DEFAULTS["test_slice_whole"],
+    "test_size_step_mm": 2.0,
+    # Send test slices: GnomeWork's Print Queue, and Bambu Studio to slice with
+    "gnomework_url": gw.DEFAULT_URL,
+    "gnomework_token": "",
+    "bambu_path": "",
+    "print_filament": "Bambu PLA Basic",
     "bed_mm": ms.DEFAULTS["bed_mm"],
     "bed_h_mm": 256.0,
     "bed_d_mm": 256.0,
@@ -106,6 +116,8 @@ LIMITS = {
     "hole_edge_mm": ("Channel from edge", 0.5, 30, False),
     "test_slice_mm": ("Test slice thickness", 0.1, 20, False),
     "test_slice_at": ("Level slice height", 0.05, 0.95, False),
+    "test_slice_band": ("Test slice width", 1, 10, False),
+    "test_size_step_mm": ("Second size", -20, 20, False),
     "bed_mm": ("Plate width", 50, 1000, False),
     "bed_h_mm": ("Max height", 50, 1000, False),
     "bed_d_mm": ("Plate depth", 50, 1000, False),
@@ -180,6 +192,10 @@ def load_settings():
     for k in LIMITS:  # a value saved by an older version that it shouldn't have taken
         if bad_setting(k, s.get(k)):
             s[k] = DEFAULT_SETTINGS[k]
+    if s.get("test_slice_mm") == 0.4:  # the old default (2 layers at 0.2 mm): test slices are 2 at 0.28 mm now
+        s["test_slice_mm"] = DEFAULT_SETTINGS["test_slice_mm"]
+    for k in ("gnomework_url", "gnomework_token", "bambu_path", "print_filament"):
+        s[k] = str(s.get(k) or "").strip() or DEFAULT_SETTINGS[k]
     if str(s.get("shell_style")).upper() not in SHELL_STYLES:
         s["shell_style"] = "BOX"
     s["shell_style"] = str(s["shell_style"]).upper()
@@ -492,7 +508,8 @@ def _xf(M, co):
 def part_label(name):
     """What a part is called on the plates and in the plate files."""
     if name.startswith(ms.PIECE_PREFIX) and name.endswith(ms.TEST_SUFFIX):
-        return "Test slice, piece " + name[len(ms.PIECE_PREFIX):-len(ms.TEST_SUFFIX)]
+        tag = name[len(ms.PIECE_PREFIX):-len(ms.TEST_SUFFIX)]
+        return "Test slice" if tag == ms.WHOLE else "Test slice, piece " + tag
     if name.startswith(ms.PIECE_PREFIX):
         return "Shell " + name[len(ms.PIECE_PREFIX):]
     if name.startswith("SEAM_CARD_"):
@@ -610,6 +627,7 @@ def job_insert_only(spec_in, cuts, settings, frame=None):
 
 def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert=None, seam_cards=None):
     """Build the shell and its test slices, or with slices_only, just the slices."""
+    piece_specs = [dict(x) for x in (pieces or [])]
     latex = bpy.data.objects.get(STATE["latex"] or "")
     if latex is None:
         raise RuntimeError("Load a scan first.")
@@ -667,6 +685,8 @@ def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert
             channel_pairs=bool(settings.get("channel_pairs")), pair_gap_mm=float(settings.get("pair_gap_mm", 10)),
             test_slice_mm=settings["test_slice_mm"], test_slice_style=settings["test_slice_style"],
             test_slice_at=settings["test_slice_at"], bottom_trim_mm=settings["bottom_trim_mm"],
+            test_slice_band=float(settings.get("test_slice_band", 3.0)),
+            test_slice_whole=bool(settings.get("test_slice_whole", True)),
             pour_extend_mm=settings["pour_extend_mm"], pour_flare_deg=settings["pour_flare_deg"],
             insert=ins.spec_from(insert) if insert and not slices_only else None)
         if slices_only:
@@ -674,7 +694,13 @@ def job_build(cuts, settings, pieces=None, frame=None, slices_only=False, insert
             if not pieces:
                 raise RuntimeError("None of the slices reached the shell. Check the cuts and try again.")
         else:
-            pieces, report = ms.build_shell(latex, auto_cut=False, units="MM", explode_mm=0, cuts=cut_list, pieces=pieces, frame=frame, **kw)
+            pieces, report = ms.build_shell(latex, auto_cut=False, units="MM", explode_mm=0, cuts=cut_list, pieces=pieces, frame=frame,
+                                            test_slices=False, **kw)
+            # test slices are a contour skin round the latex whatever the shell style, as with Test slices only
+            if pieces and (piece_specs or kw["test_slice_whole"]):
+                progress("Cutting the test slices")
+                ms.build_test_slices(latex, units="MM", explode_mm=0, cuts=cut_list, pieces=piece_specs, frame=frame,
+                                     clear=False, **dict(kw, insert=None))
     finally:
         ms._apply_booleans = real_bool
         ms.on_piece = None
@@ -860,6 +886,134 @@ def job_load_recent(name):
 
 
 # ------------------------------------------------------------ scan prep
+
+def _mm_text(x):
+    """84 for 84.0, 84.5 for 84.5: the size cut into a test slice."""
+    x = round(float(x), 1)
+    return f"{x:.0f}" if abs(x - round(x)) < 0.05 else f"{x:.1f}"
+
+
+def _slicer_for(settings):
+    """Bambu Studio, and its profiles. Raises in words if it isn't there."""
+    studio = bambu.find_studio(settings.get("bambu_path", ""))
+    return studio, bambu.Profiles(bambu.profiles_dir(studio))
+
+
+def job_send_test(cuts, settings, pieces=None, frame=None):
+    """Send test slices: the test slice at the scan's size and at a second size
+    (Second size mm wider across the cut-out), each with its size cut into its
+    top, sliced in Bambu Studio for a free printer GnomeWork knows (or the one
+    with the shortest queue), and put in that printer's queue. Both go on one
+    plate if they fit, otherwise one after the other. Nothing starts: a person
+    presses Start in GnomeWork and ticks Bed is clear."""
+    latex = bpy.data.objects.get(STATE["latex"] or "")
+    if latex is None:
+        raise RuntimeError("Load a scan first.")
+    check_settings(settings)
+    t0 = time.time()
+    url, token = settings.get("gnomework_url") or gw.DEFAULT_URL, settings.get("gnomework_token") or ""
+
+    progress("Asking GnomeWork which printers are free")
+    rows = gw.printers(url, token)
+    studio, prof = _slicer_for(settings)
+
+    def can(model):
+        try:
+            prof.machine(model)
+            return True
+        except bambu.SliceError:
+            return False
+
+    row, why = gw.pick_printer(rows, can)
+    if row is None:
+        raise RuntimeError(why)
+    W, D, H = bambu.bed_of(prof.machine(row["model"]))
+    W, D, H = W or float(settings["bed_mm"]), D or float(settings.get("bed_d_mm") or settings["bed_mm"]), H or float(settings["bed_h_mm"])
+
+    # where the slice goes: as the app planned it
+    plan = next((pc.get("slice") for pc in (pieces or []) if (pc.get("slice") or {}).get("point")), None)
+    if not plan:
+        raise RuntimeError("Add a cut first, so GnomeShell knows where the test slice goes.")
+    pt, n = Vector(plan["point"]), Vector(plan["normal"]).normalized()
+    w0 = ms.slice_section_width(latex, pt, n)
+    if not w0:
+        raise RuntimeError("The test slice misses the scan. Drag its pink dot onto the model and try again.")
+    step = float(settings.get("test_size_step_mm", 2.0))
+    sizes = [w0, w0 + step] if abs(step) >= 0.05 else [w0]
+    if min(sizes) < 5:
+        raise RuntimeError("The second size is too small. Change Second size under Settings, Test slice.")
+
+    cut_list = [(c["point"], c["normal"], c.get("scope") or []) for c in cuts]
+    contour_kw = dict(contour_mm=float(settings["contour_mm"]), wall_mm=settings["wall_mm"],
+                      hole_d_mm=settings["hole_d_mm"], hole_edge_mm=settings["hole_edge_mm"],
+                      test_slice_mm=settings["test_slice_mm"], test_slice_style=settings["test_slice_style"],
+                      test_slice_at=settings["test_slice_at"], bottom_trim_mm=settings["bottom_trim_mm"],
+                      test_slice_band=float(settings["test_slice_band"]), test_slice_whole=bool(settings["test_slice_whole"]),
+                      pour_extend_mm=settings["pour_extend_mm"], pour_flare_deg=settings["pour_flare_deg"],
+                      spouts=_spouts(latex))
+    layer = float(settings["test_slice_mm"]) / 2  # two layers
+    items, labels = [], []
+    for k, size in enumerate(sizes):
+        label = _mm_text(size)
+        labels.append(label)
+        progress(f"Cutting the {label} mm test slice")
+        old = ms.scale_about_section(latex, pt, n, size / w0) if k else None
+        try:
+            out, _ = ms.build_test_slices(latex, units="MM", explode_mm=0, cuts=cut_list, pieces=[dict(x) for x in (pieces or [])],
+                                          frame=frame, **contour_kw)
+        finally:
+            if old is not None:
+                latex.matrix_world = old
+                bpy.context.view_layer.update()
+        if not out:
+            raise RuntimeError("The test slice didn't reach the shell. Move its pink dot and try again.")
+        progress(f"Cutting {label} into the {label} mm test slice")
+        for o in out:
+            ms.engrave_label(o, label, layer)
+            co, tris = ms._world_tris(o)
+            B = ms.test_flat_basis(o)
+            if np.linalg.det(B) < 0:
+                tris = tris[:, ::-1]
+            flat = co @ B
+            flat = flat - np.array([0.0, 0.0, flat[:, 2].min()])
+            tag = o.name[len(ms.PIECE_PREFIX):-len(ms.TEST_SUFFIX)]
+            items.append((f"{label} mm" + ("" if tag == ms.WHOLE else f", piece {tag}"), flat, tris, label))
+            ms._remove(o)
+
+    # one plate if they all fit on this printer, otherwise a plate (and a print) each
+    progress("Setting them out on the plate")
+    got = {nm: (co, tris) for nm, co, tris, _ in items}
+    plan_ = ms.plan_plates([(nm, co) for nm, co, _, _ in items], W, D, H)
+    if any(it.get("too_big") for pl in plan_ for it in pl):
+        raise RuntimeError(f"A test slice is bigger than {row['name']}'s plate.")
+    folder = STATE["folder"]
+    send_dir = os.path.join(folder, "test prints")
+    os.makedirs(send_dir, exist_ok=True)
+    name = STATE.get("name") or "Scan"
+    sent = []
+    for k, pl in enumerate(plan_, 1):
+        named = []
+        for it in pl:
+            co, tris = got[it["name"]]
+            R = ms._turn_z(it["turn"])
+            named.append((f"Test slice {it['name']}", co @ R.T + np.array(it["off"]), tris))
+        these = [nm for nm, _, _, lab in items if any(it["name"] == nm for it in pl)]
+        sizes_here = sorted({lab for nm, _, _, lab in items if nm in these}, key=float)
+        what = " and ".join(sizes_here) + " mm"
+        src = os.path.join(send_dir, f"{name} test slices {what}.3mf")
+        ms.write_3mf(src, named, W, arrange=False, keep=True)
+        progress(f"Slicing the {what} test slice{'s' if len(sizes_here) > 1 else ''} in Bambu Studio for {row['model']}")
+        dst = os.path.join(send_dir, f"{name} test slices {what}.gcode.3mf")
+        bambu.slice_plate(studio, src, dst, row["model"], layer_mm=layer, filament=settings.get("print_filament") or "Bambu PLA Basic")
+        progress(f"Putting it in {row['name']}'s queue")
+        ans = gw.queue_file(url, token, row["id"], dst, f"{name} test slice{'s' if len(sizes_here) > 1 else ''} {what}")
+        sent.append({"file": os.path.basename(dst), "sizes": sizes_here, "id": ans.get("id"), "ready": bool(ans.get("ready")),
+                     "ahead": int(ans.get("ahead") or 0), "problem": ans.get("problem")})
+    progress("Done")
+    return {"send": {"printer": row["name"], "model": row["model"], "picked": why, "sizes": labels, "prints": sent,
+                     "ready": bool(sent and sent[0]["ready"]), "folder": send_dir, "gnomework": url.rstrip("/")},
+            "name": STATE.get("name"), "folder": folder, "seconds": round(time.time() - t0), "slices_only": True}
+
 
 def _latex():
     latex = bpy.data.objects.get(STATE["latex"] or "")
@@ -1590,7 +1744,7 @@ IS_WORKER = WORKER_FLAG in sys.argv
 
 
 def _build_public(j):
-    out = {k: j.get(k) for k in ("id", "name", "state", "progress", "error", "slices_only", "queued_at", "started_at")}
+    out = {k: j.get(k) for k in ("id", "name", "state", "progress", "error", "slices_only", "send", "queued_at", "started_at")}
     ahead = [x for x in BUILDS["jobs"] if x["state"] in ("queued", "running")]
     out["place"] = next((k for k, x in enumerate(ahead) if x is j), None)  # 0: building now
     if j["state"] == "done":
@@ -1624,22 +1778,24 @@ def build_enqueue(args, snap):
     if not STATE.get("latex") or not folder:
         raise RuntimeError("Load a scan first.")
     with BUILDS["lock"]:
-        same = next((j for j in BUILDS["jobs"] if j["name"] == name and j["state"] == "queued"), None)
+        send = bool(args.get("send"))
+        same = next((j for j in BUILDS["jobs"] if j["name"] == name and j["state"] == "queued" and bool(j.get("send")) == send), None)
         bid = same["id"] if same else BUILDS["next"]
         pdir = os.path.join(PREVIEW_DIR, f"build-{bid}")
         os.makedirs(pdir, exist_ok=True)
         spouts = snap(os.path.join(pdir, "scan.stl"))
         if same:
-            same.update(args=args, spouts=spouts, slices_only=bool(args.get("slices_only")), queued_at=time.time())
+            same.update(args=args, spouts=spouts, slices_only=bool(args.get("slices_only")) or send, queued_at=time.time())
             j = same
         else:
             j = {"id": bid, "name": name, "folder": folder, "state": "queued", "progress": "Waiting its turn",
-                 "args": args, "spouts": spouts, "slices_only": bool(args.get("slices_only")), "queued_at": time.time(),
+                 "args": args, "spouts": spouts, "slices_only": bool(args.get("slices_only")) or send, "send": send, "queued_at": time.time(),
                  "started_at": None, "error": None, "result": None, "proc": None}
             BUILDS["next"] += 1
             BUILDS["jobs"].append(j)
         # finished builds of this scan are done with; only the newest one counts
-        BUILDS["jobs"] = [x for x in BUILDS["jobs"] if x is j or x["name"] != name or x["state"] in ("queued", "running")]
+        BUILDS["jobs"] = [x for x in BUILDS["jobs"] if x is j or x["name"] != name or x["state"] in ("queued", "running")
+                          or bool(x.get("send")) != send]
         out = _build_public(j)
     BUILDS["wake"].set()
     return out
@@ -1738,8 +1894,11 @@ def worker_main(job_path):
         STATE.update(latex=latex.name, name=job["name"], folder=os.path.join(OUT_ROOT, job["name"]))
         if job.get("spouts"):
             latex["spouts"] = json.dumps(job["spouts"])
-        res = job_build(a["cuts"], a["settings"], a.get("pieces"), a.get("frame"), bool(a.get("slices_only")),
-                        a.get("insert"), a.get("seam_cards"))
+        if a.get("send"):
+            res = job_send_test(a["cuts"], a["settings"], a.get("pieces"), a.get("frame"))
+        else:
+            res = job_build(a["cuts"], a["settings"], a.get("pieces"), a.get("frame"), bool(a.get("slices_only")),
+                            a.get("insert"), a.get("seam_cards"))
         for p in res.get("previews", []):
             p["url"] = p["url"].replace("/api/preview/", f"/api/preview/{job['url_dir']}/", 1)
         _write_json(out, res)
@@ -2015,7 +2174,8 @@ class Handler(BaseHTTPRequestHandler):
                 snap = lambda path: self._busy(job_snapshot, path)  # noqa: E731
                 return self._send(200, build_enqueue({"cuts": data["cuts"], "settings": settings, "pieces": data.get("pieces"),
                                                       "frame": data.get("frame"), "slices_only": bool(data.get("slices_only")),
-                                                      "insert": data.get("insert"), "seam_cards": data.get("seam_cards")}, snap))
+                                                      "insert": data.get("insert"), "seam_cards": data.get("seam_cards"),
+                                                      "send": bool(data.get("send"))}, snap))
             if p == "/api/build_cancel":
                 return self._send(200, build_cancel(int(data.get("id") or 0)))
             if p == "/api/tabs":
