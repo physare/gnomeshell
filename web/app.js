@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.16.4"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.16.5"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -3933,10 +3933,12 @@ $("#maskFind").onclick = () => {
     if (!r.features.length) { toast("Nothing stands up from the rest of the selected area. Try a smaller Feature size, or draw round each opening with Subtract."); return; }
     maskMark();
     MASK.f = base.slice(); MASK.featBase = base;
-    MASK.feats = r.features.map((x) => ({ ...x, d: maskFromB64(x.dist), on: true }));
+    // the big ones (the eyes) are cut out; much smaller finds are listed but left filled in
+    const wMax = Math.max(...r.features.map((x) => x.width_mm));
+    MASK.feats = r.features.map((x) => ({ ...x, d: maskFromB64(x.dist), on: x.width_mm >= 0.65 * wMax }));
     $("#maskFeat").hidden = false; maskFeatRender(); maskFeatEdit();
-    const n = r.features.length;
-    toast(`Cut out ${n} opening${n === 1 ? "" : "s"}, numbered in the view. Fill in any that shouldn't be painted.`, true);
+    const n = MASK.feats.filter((x) => x.on).length, rest = MASK.feats.length - n;
+    toast(`Cut out ${n} opening${n === 1 ? "" : "s"}, numbered in the view.${rest ? ` ${rest} smaller raised spot${rest === 1 ? " is" : "s are"} listed but left filled in.` : ""} Press Fill in or Cut out to change any.`, true);
   }, true);
 };
 $("#maskMargin").addEventListener("change", () => { if (!MASK.feats) return; maskMark(); maskFeatEdit(); });

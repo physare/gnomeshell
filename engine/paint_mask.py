@@ -222,7 +222,7 @@ def _taubin(P, tris, fixed, passes=4, lam=0.5, mu=-0.53):
     return P
 
 
-PINHOLE_MM = 12.0  # an opening with a shorter edge than this (about 4 mm across) is filled in
+PINHOLE_MM = 12.0  # an opening with a shorter edge than this (about 4 mm across), or round just one corner or two, is filled in
 
 
 def build(co, tris, field, thickness=1.2, gap=0.1, fine_edge=True, edge_mm=0.45, smooth=True):
@@ -281,7 +281,7 @@ def build(co, tris, field, thickness=1.2, gap=0.1, fine_edge=True, edge_mm=0.45,
     # a fan of triangles from the middle of each
     bset = {(int(a), int(b)) for a, b in bedges}
     perim = lambda lp: float(np.linalg.norm(P[lp] - P[np.roll(lp, -1)], axis=1).sum())
-    pin = [lp for lp in holes if perim(lp) < PINHOLE_MM and (int(lp[-1]), int(lp[0])) in bset]
+    pin = [lp for lp in holes if (perim(lp) < PINHOLE_MM or len(lp) <= 8) and (int(lp[-1]), int(lp[0])) in bset]
     if pin:
         holes = [lp for lp in holes if not any(lp is q for q in pin)]
         addP, addN, addF, gone = [], [], [], set()
@@ -367,71 +367,110 @@ def _diffuse(co, E, iters, lam=0.6):
     return x
 
 
-def find_raised(co, tris, feature_mm=None, most=8, area=None):
-    """Bumps that stand up off the surface round them, like eyes: how far each
-    corner stands out from a smoothed copy of the model (smoothed over about
-    feature_mm), grouped into connected bumps. Returns a list, biggest first, of
-    {center, normal, width_mm, raised_mm, dist}: dist is the signed distance (mm)
-    from each corner to the bump's edge, below zero on the bump.
-    area (a True per corner) keeps the search to the painted part: only bumps
-    inside it count, and they only need to stand out from the rest of it."""
-    co = np.asarray(co, dtype=np.float64)
-    tris = np.asarray(tris, dtype=np.int64)
-    E = _edges(tris)
-    el = float(np.linalg.norm(co[E[:, 0]] - co[E[:, 1]], axis=1).mean())
-    size = float((co.max(0) - co.min(0)).max())
-    area = np.ones(len(co), dtype=bool) if area is None else np.asarray(area, dtype=bool)
-    if not area.any():
-        return []
-    span = float((co[area].max(0) - co[area].min(0)).max())
-    R = float(feature_mm) if feature_mm else min(0.08 * size, max(0.2 * span, 3 * el))
-    iters = int(min(800, max(8, (R / max(el, 1e-6)) ** 2)))
-    vn, _ = _vertex_normals(co, tris, smooth=1)
-    d = np.einsum("ij,ij->i", co - _diffuse(co, E, iters), vn)
-    # smooth the measure itself a little, so a bumpy scan gives round edges
-    d = _diffuse(d[:, None], E, int(min(200, max(2, (0.3 * R / max(el, 1e-6)) ** 2))))[:, 0]
-    med = float(np.median(d[area]))
-    spread = max(float(np.percentile(d[area], 90)) - med, 1e-6)
-    lo, hi = med + spread, med + 3 * spread
-    inr = (d > lo) & area
-    # connected bumps among the raised corners
-    parent = np.arange(len(co))
+def _labels(mask, E, n):
+    """Connected parts of the corners in mask (one root id per corner, -1 off it)."""
+    parent = np.arange(n)
 
     def find(x):
         while parent[x] != x:
             parent[x] = parent[parent[x]]
             x = parent[x]
         return x
-    for a, b in E[inr[E[:, 0]] & inr[E[:, 1]]]:
+    for a, b in E[mask[E[:, 0]] & mask[E[:, 1]]]:
         ra, rb = find(a), find(b)
         if ra != rb:
             parent[ra] = rb
-    idx = np.flatnonzero(inr)
-    roots = np.array([find(v) for v in idx])
+    lab = np.full(n, -1)
+    idx = np.flatnonzero(mask)
+    lab[idx] = [find(v) for v in idx]
+    return lab
+
+
+def _grow(m, E, within, k):
+    for _ in range(k):
+        x = m[E[:, 0]] | m[E[:, 1]]
+        g = np.zeros_like(m)
+        g[E[x].ravel()] = True
+        m = (m | g) & within
+    return m
+
+
+def _shrink(m, E, k):
+    for _ in range(k):
+        x = m[E[:, 0]] != m[E[:, 1]]
+        b = np.zeros_like(m)
+        b[E[x].ravel()] = True
+        m = m & ~b
+    return m
+
+
+def find_raised(co, tris, feature_mm=None, most=8, area=None):
+    """Raised parts like eyes inside the painted area: where the surface stands
+    out from a smoothed copy of itself (smoothed over about feature_mm). A raised
+    outline (an eye drawn as a rim with a pupil) counts with everything inside
+    it. Returns a list, strongest first, of {center, normal, width_mm,
+    raised_mm, dist}: dist is the signed distance (mm) from each corner to the
+    part's edge, below zero on it. area (a True per corner) is the painted part;
+    without it the whole model is searched."""
+    co = np.asarray(co, dtype=np.float64)
+    tris = np.asarray(tris, dtype=np.int64)
+    E = _edges(tris)
+    el = float(np.linalg.norm(co[E[:, 0]] - co[E[:, 1]], axis=1).mean())
+    size = float((co.max(0) - co.min(0)).max())
+    area = np.ones(len(co), dtype=bool) if area is None else np.asarray(area, dtype=bool)
+    if area.sum() < 20:
+        return []
+    span = float((co[area].max(0) - co[area].min(0)).max())
+    R = float(feature_mm) if feature_mm else min(0.04 * size, max(0.12 * span, 3 * el))
+    iters = int(min(3000, max(4, (R / max(el, 1e-6)) ** 2)))
+    vn, _ = _vertex_normals(co, tris, smooth=1)
+    d = np.einsum("ij,ij->i", co - _diffuse(co, E, iters), vn)
+    d = _diffuse(d[:, None], E, 2)[:, 0]
+    # the painted area's own edge: a part touching it isn't inside the area
+    x = area[E[:, 0]] != area[E[:, 1]]
+    edge = np.zeros(len(co), dtype=bool)
+    edge[E[x].ravel()] = True
+    edge &= area
+    t = float(np.percentile(d[area], 70))
+    # the raised corners, with small gaps in a rim closed (grow, fill what the
+    # rim encloses, shrink back)
+    k = int(np.clip(round(1.5 / max(el, 1e-6)), 1, 3))  # about 1.5 mm
+    up = _grow(area & (d > t), E, area, k)
+    low = area & ~up
+    llab = _labels(low, E, len(co))
+    open_ = set(np.unique(llab[edge & low]).tolist())
+    filled = up.copy()
+    for r in np.unique(llab[low]):
+        if r not in open_:
+            filled[llab == r] = True
+    filled = _shrink(filled, E, k) & area
+    lab = _labels(filled, E, len(co))
+    tri_area = 0.5 * np.linalg.norm(np.cross(co[tris[:, 1]] - co[tris[:, 0]], co[tris[:, 2]] - co[tris[:, 0]]), axis=1)
+    v_area = np.bincount(tris.ravel(), np.repeat(tri_area / 3, 3), len(co))
     out = []
-    for r in np.unique(roots):
-        m = idx[roots == r]
-        if len(m) < 3 or d[m].max() < hi:
+    for r in np.unique(lab[filled]):
+        mask = lab == r
+        m = np.flatnonzero(mask)
+        if len(m) < max(10, 0.002 * area.sum()) or edge[m].any():
             continue
-        # the bump's edge: where each edge leaving it crosses lo
-        mask = np.zeros(len(co), dtype=bool)
-        mask[m] = True
-        cross = E[mask[E[:, 0]] != mask[E[:, 1]]]
-        outer = np.where(mask[cross[:, 0]], cross[:, 1], cross[:, 0])
-        if len(outer) and (~area[outer]).mean() > 0.5:
-            continue  # mostly off the edge of the painted part: not a bump in it
-        a, b = cross[:, 0], cross[:, 1]
-        t = np.clip((lo - d[a]) / np.where(d[b] - d[a] == 0, 1e-9, d[b] - d[a]), 0, 1)
-        pts = co[a] + t[:, None] * (co[b] - co[a])
         c = co[m].mean(0)
         w = float(np.linalg.norm(co[m] - c, axis=1).max() * 2)
+        if v_area[m].sum() < 0.3 * np.pi * (w / 2) ** 2:
+            continue  # a long thin streak, not a rounded part
+        cross = E[mask[E[:, 0]] != mask[E[:, 1]]]
+        inside = np.where(mask[cross[:, 0]], cross[:, 0], cross[:, 1])
+        outside = np.where(mask[cross[:, 0]], cross[:, 1], cross[:, 0])
+        pts = 0.5 * (co[inside] + co[outside])  # the edge: halfway across each edge leaving it
         near = np.linalg.norm(co - c, axis=1) < w / 2 + 80
         dist = np.full(len(co), OUT)
         dist[near] = _dist_to(co[near], pts)
         dist[mask] *= -1
         nrm = vn[m].sum(0)
         nrm /= np.linalg.norm(nrm) or 1
-        out.append({"center": c, "normal": nrm, "width_mm": w, "raised_mm": float(d[m].max() - med),
-                    "score": float((d[m] - lo).sum()), "dist": np.clip(dist, -OUT, OUT)})
+        out.append({"center": c, "normal": nrm, "width_mm": w, "raised_mm": float(d[m].max() - t),
+                    "score": float(np.clip(d[m] - t, 0, None) @ v_area[m]), "dist": np.clip(dist, -OUT, OUT)})
     out.sort(key=lambda o: -o["score"])
+    if out:  # far fainter than the strongest: the lie of the surface, not a feature
+        top = max(o["raised_mm"] for o in out)
+        out = [o for o in out if o["raised_mm"] >= 0.3 * top]
     return out[:most]
