@@ -78,6 +78,14 @@ def _class_of(h):
     return cls.value
 
 
+def _title_of(h):
+    if not h:
+        return ""
+    t = ctypes.create_unicode_buffer(512)
+    _u.GetWindowTextW(h, t, 512)
+    return t.value
+
+
 def _exe_of(h):
     pid = wintypes.DWORD()
     _u.GetWindowThreadProcessId(h, ctypes.byref(pid))
@@ -159,7 +167,7 @@ def _watch(target, before, timeout):
             # that was clicked): a window you switch to stays in front.
             fg = _u.GetForegroundWindow()
             ours = {h for _, h in found}
-            took = fg in before or _class_of(fg) == "CabinetWClass"
+            took = _class_of(fg) == "CabinetWClass" or "gnomeshell" in _title_of(fg).lower()
             pick = [h for _, h in found] if found and fg not in ours and took else []
         else:
             pick = [h for fresh, h in found if h not in done and (fresh or not done)]
