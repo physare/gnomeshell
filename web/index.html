@@ -65,6 +65,8 @@
       <label for="tPour"><input id="tPour" type="checkbox" checked> Pour collar</label>
       <label for="tSlices"><input id="tSlices" type="checkbox" checked> Test slices<kbd>T</kbd></label>
       <label for="tSeam"><input id="tSeam" type="checkbox" checked> Seam cards</label>
+      <label for="tMaskArea"><input id="tMaskArea" type="checkbox" checked> Paint mask area</label>
+      <label for="tMask"><input id="tMask" type="checkbox" checked> Built paint mask</label>
       </div>
     </details>
     <div class="tgrp" id="doneTools" hidden>
@@ -451,8 +453,7 @@
           </details>
 
           <div class="mask-pane" data-in="mask">
-            <div class="head-row h2help"><h2>Paint mask</h2><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="A thin cover that fits over the piece, with openings where the paint goes. Select the area to cover, subtract the openings (the eyes, say), and build it. Tape it on and spray through the openings.">?</span></div>
-            <p class="muted small" id="maskIntro">First select the area to cover: pick Ellipse, Box or Free line and draw round it with Add. Then Cut out raised features makes the openings over the eyes, or draw round each opening yourself with Subtract. With no tool picked, dragging turns the view. With a tool picked, Shift+drag or the middle mouse button turns it; Esc puts the tool down.</p>
+            <div class="head-row h2help"><h2>Paint mask</h2><span class="help" tabindex="0" role="img" aria-label="Help" data-tip="A thin cover that fits over the piece, with openings where the paint goes, to tape on and spray through. First select the area to cover: pick Ellipse, Box or Free line and draw round it with Add. Then Cut out raised features makes the openings over the eyes, or draw round each opening yourself with Subtract. With no tool picked, dragging turns the view. With a tool picked, Shift+drag or the middle mouse button turns it; Esc puts the tool down.">?</span></div>
             <div class="seg four" role="group" aria-label="Draw with" id="maskTool">
               <button type="button" data-tool="ellipse" title="Drag an ellipse round the area. Shift after you start makes a circle. Click again or press Esc to put it down. (O)">Ellipse</button>
               <button type="button" data-tool="box" title="Drag a box round the area. Shift after you start makes a square. (X)">Box</button>
@@ -478,6 +479,10 @@
               <button type="button" class="btn sm" id="maskGrow" title="Moves the edge of the mask out by 1 mm all round, openings included">Expand</button>
               <button type="button" class="btn sm" id="maskShrink" title="Moves the edge of the mask in by 1 mm all round, openings included">Contract</button>
             </div>
+            <div class="fields">
+              <label for="maskColors">Colours <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="The model's colour and the picked area's colour while you paint. Pick the pair that shows your scan best.">?</span><select id="maskColors"><option value="blue">Orange model, blue area</option><option value="orange">Gray model, orange area</option><option value="magenta">White model, pink area</option><option value="green">Dark model, green area</option></select></label>
+            </div>
+            <label class="check" for="maskDetail"><input id="maskDetail" type="checkbox"> Show raised detail <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="Shades the model by its shape: raised edges lighter, grooves darker. Makes a shallow eye rim easy to see and trace.">?</span></label>
             <button type="button" class="btn sm" id="maskClear" title="Clears the selection and removes the built mask from the view. Ctrl+Z brings the selection back.">Clear mask</button>
             <dl class="kv" id="maskKv"></dl>
             <div class="fields">
@@ -496,6 +501,7 @@
             <div id="maskDone" hidden>
               <dl class="kv" id="maskDoneKv"></dl>
               <div class="btn-grid">
+                <button type="button" class="btn sm" id="maskEdit" title="Hides the built mask so you can change the painted area, then build again">Edit the mask</button>
                 <button type="button" class="btn sm" id="maskOpen" title="Opens the paint mask's 3MF, turned dome up and ready to slice">Open in Bambu Studio</button>
                 <button type="button" class="btn sm" id="maskFolder">Show folder</button>
               </div>

@@ -406,25 +406,42 @@ def build(co, tris, field, thickness=1.2, gap=0.1, fine_edge=True, edge_mm=0.45,
             if ln > 0:
                 out_dir[a] += o / ln
                 out_dir[b] += o / ln
-        # the lip's up and out directions, smoothed along the edge (over about
-        # 3 mm) so it runs as one even collar round bumps in the model
-        Nl = N.copy()
+        # the lip stands straight up the way the mask faces (the way it prints
+        # dome up), not along the model's own surface: a wall swept one way
+        # can't fan out or fold over itself round a tight bend such as an ear
+        U = (outer_v - inner).sum(0)
+        U /= np.linalg.norm(U) or 1.0
+        # it follows the edge smoothed over about 3 mm, so a ragged stretch
+        # of edge (where it runs along an ear's outline, say) still gets an
+        # even wall; the strip along its foot and its top close the gap
+        O = np.zeros((len(P), 3))
+        Si, So = inner.copy(), outer_v.copy()
         for i in outer:
             lp = np.asarray(loops[i])
             seg = np.linalg.norm(P[lp] - P[np.roll(lp, -1)], axis=1).mean() or 1.0
-            for _ in range(int(min(200, max(2, (3.0 / seg) ** 2)))):
-                for A in (Nl, out_dir):
-                    A[lp] = 0.25 * A[np.roll(lp, 1)] + 0.5 * A[lp] + 0.25 * A[np.roll(lp, -1)]
-        Nl /= np.maximum(np.linalg.norm(Nl, axis=1), 1e-9)[:, None]
+            si, so = inner[lp].copy(), outer_v[lp].copy()
+            for _ in range(int(min(400, max(2, (3.0 / seg) ** 2)))):
+                for A in (si, so):
+                    A[:] = 0.25 * np.roll(A, 1, 0) + 0.5 * A + 0.25 * np.roll(A, -1, 0)
+            Si[lp], So[lp] = si, so
+            tan = np.roll(si, -1, 0) - np.roll(si, 1, 0)
+            tan -= U * (tan @ U)[:, None]
+            o = np.cross(tan, U)
+            o /= np.maximum(np.linalg.norm(o, axis=1), 1e-9)[:, None]
+            # which side is out: the side the edge's own outward steps lean to
+            if np.einsum("ij,ij->", o, out_dir[lp]) < 0:
+                o = -o
+            for _ in range(int(min(100, max(2, (1.0 / seg) ** 2)))):
+                o = 0.25 * np.roll(o, 1, 0) + 0.5 * o + 0.25 * np.roll(o, -1, 0)
+            o -= U * (o @ U)[:, None]
+            O[lp] = o / np.maximum(np.linalg.norm(o, axis=1), 1e-9)[:, None]
         vs = np.array(sorted(lip_v))
-        O = out_dir[vs] - Nl[vs] * np.einsum("ij,ij->i", out_dir[vs], Nl[vs])[:, None]
-        O /= np.maximum(np.linalg.norm(O, axis=1), 1e-9)[:, None]
+        O = O[vs]
         base = len(V)
         k = {int(v): j for j, v in enumerate(vs)}
-        Pv, Nv, tv = P[vs], Nl[vs], t[vs][:, None]
-        foot = Pv + O * lip_t_mm + Nv * gap
-        top_o = Pv + O * lip_t_mm + Nv * (gap + tv + lip_mm)
-        top_i = Pv + Nv * (gap + tv + lip_mm)
+        foot = Si[vs] + O * lip_t_mm
+        top_i = So[vs] + U * lip_mm
+        top_o = top_i + O * lip_t_mm
         V = np.vstack([V, foot, top_o, top_i])
         m = len(vs)
         prof = lambda v: [v, base + k[v], base + m + k[v], base + 2 * m + k[v], v + nv]  # inner, foot, top out, top in, outer
@@ -528,8 +545,9 @@ def find_raised(co, tris, feature_mm=None, most=8, area=None):
     """Raised parts like eyes inside the painted area: where the surface stands
     out from a smoothed copy of itself (smoothed over about feature_mm). A raised
     outline (an eye drawn as a rim with a pupil) counts with everything inside
-    it. Returns a list, strongest first, of {center, normal, width_mm,
-    raised_mm, dist}: dist is the signed distance (mm) from each corner to the
+    it. Returns a list, the ones to cut first, of {center, normal, width_mm,
+    raised_mm, ring, cut, dist}: cut is True for the parts to open (rims round
+    a hollow if there are any, else the biggest), and dist is the signed distance (mm) from each corner to the
     part's edge, below zero on it. area (a True per corner) is the painted part;
     without it the whole model is searched."""
     co = np.asarray(co, dtype=np.float64)
@@ -540,8 +558,9 @@ def find_raised(co, tris, feature_mm=None, most=8, area=None):
     area = np.ones(len(co), dtype=bool) if area is None else np.asarray(area, dtype=bool)
     if area.sum() < 20:
         return []
-    span = float((co[area].max(0) - co[area].min(0)).max())
-    R = float(feature_mm) if feature_mm else min(0.04 * size, max(0.12 * span, 3 * el))
+    # the smoothing reach is set by the scan, not by how big an area was drawn,
+    # so the same eye is found whatever is drawn round it
+    R = float(feature_mm) if feature_mm else min(0.04 * size, max(2.0, 4 * el))
     iters = int(min(3000, max(4, (R / max(el, 1e-6)) ** 2)))
     vn, _ = _vertex_normals(co, tris, smooth=1)
     d = np.einsum("ij,ij->i", co - _diffuse(co, E, iters), vn)
@@ -551,14 +570,14 @@ def find_raised(co, tris, feature_mm=None, most=8, area=None):
     edge = np.zeros(len(co), dtype=bool)
     edge[E[x].ravel()] = True
     edge &= area
-    t = float(np.percentile(d[area], 70))
     tri_area = 0.5 * np.linalg.norm(np.cross(co[tris[:, 1]] - co[tris[:, 0]], co[tris[:, 2]] - co[tris[:, 0]]), axis=1)
     v_area = np.bincount(tris.ravel(), np.repeat(tri_area / 3, 3), len(co))
-    kmax = int(np.clip(round(1.5 / max(el, 1e-6)), 1, 3))  # about 1.5 mm
+    kmax = int(np.clip(round(0.6 / max(el, 1e-6)), 1, 2))  # gaps in a rim up to about half a mm
 
     def parts(level, k):
-        """Raised parts at this cut-off, with gaps in a rim up to k corners wide
-        closed (grow, fill what the rim encloses, shrink back)."""
+        """Raised parts (standing above the smoothed surface), with gaps in a
+        rim up to k corners wide closed: grow, fill what the rim encloses,
+        shrink back."""
         up = _grow(area & (d > level), E, area, k)
         low = area & ~up
         llab = _labels(low, E, len(co))
@@ -570,25 +589,27 @@ def find_raised(co, tris, feature_mm=None, most=8, area=None):
         filled = _shrink(filled, E, k) & area
         lab = _labels(filled, E, len(co))
         return [lab == r for r in np.unique(lab[filled])]
-    # rounded parts, first with the gaps in a rim closed; where parts run
-    # together into a streak there, again with less closing or a higher cut-off
     taken = np.zeros(len(co), dtype=bool)
     found = []
-    for pct in (70, 80, 90):
-        level = float(np.percentile(d[area], pct))
-        for k in range(kmax, -1, -1):
-            for mask in parts(level, k):
-                m = np.flatnonzero(mask)
-                if len(m) < max(10, 0.002 * area.sum()) or edge[m].any() or taken[m].mean() > 0.3:
-                    continue
-                c = co[m].mean(0)
-                w = float(np.linalg.norm(co[m] - c, axis=1).max() * 2)
-                if v_area[m].sum() < 0.3 * np.pi * (w / 2) ** 2:
-                    continue  # a long thin streak, not a rounded part
-                taken |= mask
-                found.append((mask, m, c, w))
+    span = float((co[area].max(0) - co[area].min(0)).max())
+    # above the smoothed surface first; where the whole area bulges (so that
+    # comes out as one big part) again higher up
+    levels = [0.0] + [float(np.percentile(d[area], q)) for q in (60, 75, 90)]
+    for level, k in [(lv, k) for lv in levels for k in range(kmax, -1, -1)]:
+        for mask in parts(level, k):
+            m = np.flatnonzero(mask)
+            if len(m) < max(10, 0.002 * area.sum()) or edge[m].any() or taken[m].mean() > 0.3:
+                continue
+            c = co[m].mean(0)
+            w = float(np.linalg.norm(co[m] - c, axis=1).max() * 2)
+            if w > 0.5 * span or v_area[m].sum() < 0.45 * np.pi * (w / 2) ** 2:
+                continue  # most of the area, or a long thin streak: not a rounded part
+            taken |= mask
+            inner = _shrink(mask, E, 1)  # a hollow inside it: a rim round a pupil, say
+            ring = bool((inner & (d <= 0)).sum() >= max(3, 0.01 * inner.sum()))
+            found.append((mask, m, c, w, ring))
     out = []
-    for mask, m, c, w in found:
+    for mask, m, c, w, ring in found:
         cross = E[mask[E[:, 0]] != mask[E[:, 1]]]
         inside = np.where(mask[cross[:, 0]], cross[:, 0], cross[:, 1])
         outside = np.where(mask[cross[:, 0]], cross[:, 1], cross[:, 0])
@@ -599,10 +620,17 @@ def find_raised(co, tris, feature_mm=None, most=8, area=None):
         dist[mask] *= -1
         nrm = vn[m].sum(0)
         nrm /= np.linalg.norm(nrm) or 1
-        out.append({"center": c, "normal": nrm, "width_mm": w, "raised_mm": float(d[m].max() - t),
-                    "score": float(np.clip(d[m] - t, 0, None) @ v_area[m]), "dist": np.clip(dist, -OUT, OUT)})
-    out.sort(key=lambda o: -o["score"])
+        lift = float(np.clip(d[m], 0, None) @ v_area[m] / v_area[m].sum())
+        out.append({"center": c, "normal": nrm, "width_mm": w, "raised_mm": float(d[m].max()), "ring": ring,
+                    "lift": lift, "score": lift * v_area[m].sum(), "dist": np.clip(dist, -OUT, OUT)})
     if out:  # far fainter than the strongest: the lie of the surface, not a feature
-        top = max(o["raised_mm"] for o in out)
-        out = [o for o in out if o["raised_mm"] >= 0.3 * top]
+        top = max(o["lift"] for o in out)
+        out = [o for o in out if o["lift"] >= 0.3 * top]
+    # which to cut: a raised rim round a hollow (an eye drawn with a pupil) if
+    # there is one, else the biggest; parts much smaller are left filled in
+    pool = [o for o in out if o["ring"]] or out
+    wmax = max((o["width_mm"] for o in pool), default=0)
+    for o in out:
+        o["cut"] = bool((o["ring"] or pool is out) and o["width_mm"] >= 0.65 * wmax)
+    out.sort(key=lambda o: (not o["cut"], -o["score"]))
     return out[:most]
