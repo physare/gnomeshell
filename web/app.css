@@ -98,6 +98,13 @@ input[type=range] { accent-color: var(--latex); }
 #fileMeta.bad { color: #f08a70; }
 .scan-warn { border: 1px solid #8a4a38; background: #3a2420; color: #f6d3c9; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.5; }
 .scan-warn p { margin: 0; }
+.scan-warn .inline { display: flex; gap: 8px; flex-wrap: wrap; }
+.keep-box { border: 1px solid #3f7a4c; background: #1f3324; color: #d4f0d9; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 1.5; }
+.keep-box p { margin: 0; }
+.keep-box[hidden] { display: none; }
+.keep-box .inline { display: flex; align-items: center; gap: 8px; }
+.keep-box .inline label { white-space: nowrap; }
+.keep-box .inline input { width: 90px; flex: none; }
 .scan-warn[hidden], .done-warn[hidden] { display: none; }
 .done-warn { border: 1px solid #8a4a38; background: #3a2420; color: #f6d3c9; border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.5; margin: 0; }
 input.bad { border-color: #f08a70 !important; box-shadow: 0 0 0 2px rgba(240, 138, 112, 0.25); }

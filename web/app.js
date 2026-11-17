@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.16.5"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.16.6"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -102,7 +102,7 @@ const detachHandle = () => gizmos.forEach((g) => g.detach());
 // where the arrow and a ring cross, only the arrow takes the drag
 canvas.addEventListener("pointerdown", (e) => {
   if (!gizmoT.object) return;
-  if (e.button === 0 && (insHandleAt(e) || sizerAt(e) || sliceHandleAt(e))) { gizmos.forEach((g) => (g.enabled = false)); return; } // the insert's and the sizer's handles win
+  if (e.button === 0 && (keepAt(e) || insHandleAt(e) || sizerAt(e) || sliceHandleAt(e))) { gizmos.forEach((g) => (g.enabled = false)); return; } // the keep box's, the insert's and the sizer's handles win
   gizmos.forEach((g) => { g.enabled = true; g.pointerHover(g._getPointer(e)); });
   if (gizmoT.axis) gizmoR.enabled = false; else if (gizmoR.axis) gizmoT.enabled = false;
 }, true);
@@ -1337,6 +1337,8 @@ let drag = null, down = null, hoverT = null;
 canvas.addEventListener("pointerdown", (e) => {
   down = null; closeMenu();
   if (SEAM.picking || WEB.picking || SPOUT.picking || splitHandleAt(e) || maskTab()) return; // their own click handlers deal with it
+  const kh = e.button === 0 && !e.shiftKey ? keepAt(e) : null;
+  if (kh) { keepStart(e, kh); e.stopImmediatePropagation(); return; }
   const sh = e.button === 0 && S.step === "cut" ? sizerAt(e) : null;
   if (sh) { sizerStart(e, sh); e.stopImmediatePropagation(); return; }
   const ih = e.button === 0 && S.step === "cut" ? insHandleAt(e) : null;
@@ -1360,6 +1362,7 @@ canvas.addEventListener("pointerdown", (e) => {
 canvas.addEventListener("pointermove", (e) => {
   if (maskTab()) return; // the paint mask brush has its own
   if (cutLine) { cutLineMove(e); return; }
+  if (KEEP.drag) { keepMove(e); return; }
   if (sizeDrag) { sizerMove(e); return; }
   if (insDrag) { insDragMove(e); return; }
   if (sliceDrag) { sliceDragMove(e); return; }
@@ -1378,7 +1381,7 @@ canvas.addEventListener("pointermove", (e) => {
   hoverT = requestAnimationFrame(() => {
     hoverT = null;
     if (S.mode === "draw") return;
-    if (insHandleAt(e) || sizerAt(e) || sliceHandleAt(e)) { canvas.style.cursor = "grab"; return; }
+    if (keepAt(e) || insHandleAt(e) || sizerAt(e) || sliceHandleAt(e)) { canvas.style.cursor = "grab"; return; }
     const h = gizmoHot() ? null : pickAt(e, modeKind());
     if ((h && h.key) !== (S.hover && S.hover.key)) { S.hover = h; highlight(); canvas.style.cursor = h ? "pointer" : ""; }
   });
@@ -1387,6 +1390,7 @@ canvas.addEventListener("pointerleave", () => { if (S.hover) { S.hover = null; h
 canvas.addEventListener("pointerup", (e) => {
   if (maskTab() || MASK.stroke) return;
   if (cutLine) { cutLineEnd(e); return; }
+  if (KEEP.drag) { keepEnd(e); return; }
   if (sizeDrag) { sizerEnd(e); return; }
   if (insDrag) { insDragEnd(e); return; }
   if (sliceDrag) { sliceDragEnd(e); return; }
@@ -1576,7 +1580,7 @@ const KEYS = [
   ["H / Alt+H", "Hide the row picked in the Scene list / show everything"], ["X", "Overhangs in red on or off"], ["T", "Test slices on or off"],
   ["N", "Hide or show the side panel"], ["Ctrl+S", "Save this cut layout"], ["Ctrl+B", "Build the shell"],
   ["Ctrl+T", "New tab, to open another scan"], ["Ctrl+W", "Close this tab (it asks first)"], ["Ctrl+Tab / Ctrl+Shift+Tab", "Next tab / the one before"],
-  ["F", "Fit the view"], ["Numpad 1 / 3 / 7", "Front / side / top view"], ["Ctrl+Numpad 7", "From underneath"], ["1 / 2 / 3 / 4 / 5", "Scan / Cuts / Insert / Settings / Mask tab"], ["B / E", "Paint mask: add / subtract"], ["O / X / F / U", "Paint mask: draw an ellipse / box / free line, or brush"], ["[ / ]", "Paint mask: smaller / bigger brush"], ["I", "Insert view, when the insert is on"], ["?", "Show these keys"],
+  ["F", "Fit the view"], ["Numpad 1 / 3 / 7", "Front / side / top view"], ["Ctrl+Numpad 7", "From underneath"], ["K", "Keep box: cut away a bench or table round the scan"], ["1 / 2 / 3 / 4 / 5", "Scan / Cuts / Insert / Settings / Mask tab"], ["B / E", "Paint mask: add / subtract"], ["O / X / F / U", "Paint mask: draw an ellipse / box / free line, or brush"], ["[ / ]", "Paint mask: smaller / bigger brush"], ["I", "Insert view, when the insert is on"], ["?", "Show these keys"],
 ];
 $("#keysList").innerHTML = KEYS.map(([k, v]) => `<dt class="mono">${k}</dt><dd>${v}</dd>`).join("");
 $("#keysBtn").onclick = () => { $("#keys").hidden = !$("#keys").hidden; };
@@ -1600,6 +1604,8 @@ addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "Escape") {
+    if (KEEP.drag) { keepDragCancel(); return; }
+    if (KEEP.on) { keepOff(); return; }
     if (sizeDrag) { sizerCancel(); return; }
     if (optRun) { optRun.cancel = true; return; }
     if (insViewOn() && !typing) { setInsView(false); return; }
@@ -1834,6 +1840,7 @@ async function showScan(info, keepCuts, restore, quiet) {
   fillSize();
   const g = await loadSTL(info.stl_url);
   g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 3), 3));
+  if (KEEP?.on) keepOff();
   groups.latex.clear(); sizerReset(); if (!keepCuts) baseReset(); else if (baseH()) updateBase();
   latexMesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0 }));
   groups.latex.add(latexMesh);
@@ -1941,7 +1948,7 @@ $$("[data-scale]").forEach((b) => b.onclick = () => {
 // are also dots on the sides and the top, to stretch one way only. It lets go
 // into the same resize as Apply, so the cuts move with it.
 var sizeDrag = null; // var: drawSizer can run before this line does
-function sizerOn() { return !!(S.step === "cut" && S.scan && latexMesh && curTab() === "scan" && !insViewOn() && !busyNow()); }
+function sizerOn() { return !!(S.step === "cut" && S.scan && latexMesh && curTab() === "scan" && !insViewOn() && !busyNow() && !KEEP?.on); }
 function busyNow() { return !$("#busy").hidden; }
 function sizerBase() { // the scan is scaled about the middle of its base
   const c = S.scan.center, sz = S.scan.size || S.scan.dims;
@@ -2492,6 +2499,119 @@ function sizerEnd(e) {
   $("#sizeApply").click();
 }
 
+// ------------------------------------------------------------ keep box
+// A box round the scan with a green dot on each side. Drag the dots so it
+// holds just the latex mold (the bottom just above the bench or table it was
+// scanned on); what's outside shows in red. Keep what's in the box cuts the
+// rest away in the engine and closes the cut flat. Ctrl+Z puts it back.
+var KEEP = { on: false, lo: null, hi: null, drag: null, ghost: null }; // var: handlers can run before this line
+groups.keep = new THREE.Group(); scene.add(groups.keep);
+renderer.localClippingEnabled = true;
+function keepToggle() { if (KEEP.on) keepOff(); else keepOnNow(); }
+function keepOnNow() {
+  if (!S.scan || !latexMesh || S.step !== "cut") return toast("Load a scan first.");
+  if (busyNow()) return;
+  if (curTab() !== "scan") showTab("scan");
+  if (insViewOn()) setInsView(false);
+  const box = new THREE.Box3().setFromBufferAttribute(latexMesh.geometry.attributes.position);
+  const pad = Math.max(1, size() * 0.01);
+  KEEP.lo = box.min.clone().subScalar(pad); KEEP.hi = box.max.clone().addScalar(pad);
+  KEEP.on = true; KEEP.drag = null;
+  $("#keepBox").hidden = false;
+  $("#keepBox").scrollIntoView({ block: "nearest" });
+  $$("[data-keepbox]").forEach((b) => { b.classList.add("on"); b.setAttribute("aria-pressed", "true"); });
+  KEEP.ghost = new THREE.Mesh(latexMesh.geometry, new THREE.MeshBasicMaterial({ color: "#e05a4a", transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide }));
+  KEEP.ghost.renderOrder = 3;
+  groups.keep.add(KEEP.ghost);
+  drawSizer(); keepDraw();
+  viewFrom("front");
+}
+function keepOff() {
+  if (!KEEP?.on) return;
+  KEEP.on = false; KEEP.drag = null; KEEP.ghost = null;
+  groups.keep.clear();
+  if (latexMesh) { latexMesh.material.clippingPlanes = null; latexMesh.material.needsUpdate = true; }
+  $("#keepBox").hidden = true;
+  $$("[data-keepbox]").forEach((b) => { b.classList.remove("on"); b.setAttribute("aria-pressed", "false"); });
+  orbit.enabled = true; canvas.style.cursor = "";
+  drawSizer();
+}
+const KEEP_SIDES = [[0, -1], [0, 1], [1, -1], [1, 1], [2, -1], [2, 1]];
+function keepDraw() {
+  const g = groups.keep;
+  for (const o of g.children.filter((x) => x !== KEEP.ghost)) { g.remove(o); o.geometry?.dispose(); }
+  if (!KEEP?.on) return;
+  const { lo, hi } = KEEP, c = lo.clone().add(hi).multiplyScalar(0.5), d = hi.clone().sub(lo);
+  const box = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(d.x, d.y, d.z)), new THREE.LineBasicMaterial({ color: "#6fe08a", transparent: true, opacity: 0.9, depthTest: false }));
+  box.position.copy(c); box.renderOrder = 7; g.add(box);
+  // a faint sheet where the bottom cuts, to line up with the bench top
+  const sheet = new THREE.Mesh(new THREE.PlaneGeometry(d.x, d.y), new THREE.MeshBasicMaterial({ color: "#6fe08a", transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide }));
+  sheet.position.set(c.x, c.y, lo.z); sheet.renderOrder = 4; g.add(sheet);
+  const hs = Math.max(2.5, size() * 0.014);
+  for (const [i, sgn] of KEEP_SIDES) {
+    const p = c.clone(); p.setComponent(i, sgn < 0 ? lo.getComponent(i) : hi.getComponent(i));
+    const hot = KEEP.drag && KEEP.drag.i === i && KEEP.drag.sgn === sgn;
+    const m = new THREE.Mesh(new THREE.SphereGeometry(hs * (hot ? 1.3 : 1), 16, 12), new THREE.MeshBasicMaterial({ color: i === 2 && sgn < 0 ? "#b6ffc6" : "#6fe08a", depthTest: false, transparent: true, opacity: 0.95 }));
+    m.position.copy(p); m.renderOrder = 8; m.userData.keep = { i, sgn }; g.add(m);
+  }
+  // the model shows only inside the box; the red copy shows what goes
+  const pl = [
+    new THREE.Plane(new V3(1, 0, 0), -lo.x), new THREE.Plane(new V3(-1, 0, 0), hi.x),
+    new THREE.Plane(new V3(0, 1, 0), -lo.y), new THREE.Plane(new V3(0, -1, 0), hi.y),
+    new THREE.Plane(new V3(0, 0, 1), -lo.z), new THREE.Plane(new V3(0, 0, -1), hi.z),
+  ];
+  if (latexMesh) { latexMesh.material.clippingPlanes = pl; latexMesh.material.needsUpdate = true; }
+  const bi = $("#keepBottom");
+  if (document.activeElement !== bi) bi.value = lo.z.toFixed(1);
+}
+function keepAt(e) {
+  if (!KEEP.on || !groups.keep.children.length) return null;
+  setRay(e);
+  const hit = ray.intersectObjects(groups.keep.children.filter((o) => o.userData.keep), false)[0];
+  return hit ? hit.object.userData.keep : null;
+}
+function keepStart(e, h) {
+  const { lo, hi } = KEEP, c = lo.clone().add(hi).multiplyScalar(0.5);
+  const from = c.clone(); from.setComponent(h.i, 0);
+  const u = new V3(); u.setComponent(h.i, 1);
+  KEEP.drag = { ...h, from, u, was: [lo.clone(), hi.clone()] };
+  orbit.enabled = false; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = "grabbing";
+  keepDraw();
+}
+function keepMove(e) {
+  const D = KEEP.drag; setRay(e);
+  const t = lineParam(D.from, D.u); if (t == null) return;
+  const v = Math.round(t * 2) / 2, gap = Math.max(1, size() * 0.02);
+  if (D.sgn < 0) KEEP.lo.setComponent(D.i, Math.min(v, KEEP.hi.getComponent(D.i) - gap));
+  else KEEP.hi.setComponent(D.i, Math.max(v, KEEP.lo.getComponent(D.i) + gap));
+  keepDraw();
+}
+function keepEnd(e) {
+  KEEP.drag = null; orbit.enabled = true; canvas.releasePointerCapture?.(e.pointerId); canvas.style.cursor = "";
+  keepDraw();
+}
+function keepDragCancel() {
+  const D = KEEP.drag; if (!D) return;
+  [KEEP.lo, KEEP.hi] = D.was; KEEP.drag = null; orbit.enabled = true; canvas.style.cursor = "";
+  keepDraw();
+}
+$$("[data-keepbox]").forEach((b) => b.onclick = keepToggle);
+$("#keepCancel").onclick = keepOff;
+$("#keepBottom").addEventListener("change", () => {
+  const v = parseFloat($("#keepBottom").value); if (!KEEP.on || !isFinite(v)) return;
+  KEEP.lo.z = Math.min(v, KEEP.hi.z - Math.max(1, size() * 0.02)); keepDraw();
+});
+$("#keepGo").onclick = () => {
+  if (!KEEP?.on) return;
+  const value = { min: KEEP.lo.toArray().map((x) => Math.round(x * 100) / 100), max: KEEP.hi.toArray().map((x) => Math.round(x * 100) / 100) };
+  withBusy("Keeping what's in the box", async () => {
+    const info = await api("/api/prep", { op: "keep_box", value });
+    keepOff();
+    await showScan(info, false); viewFrom("fit");
+    toast(`${info.clean_note || "Kept what's in the box."}${info.watertight ? "" : " It still has a few holes: press Repair mesh."} Ctrl+Z puts it back.`, true);
+  });
+};
+
 // ------------------------------------------------------------ a base on the model
 // A base under the model itself (not the shell): its bottom outline carried
 // straight down, or a flat slab round the whole footprint. You see it in blue
@@ -2816,6 +2936,7 @@ function showTab(t) {
   pane.dataset.tab = t;
   $$("#ptabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
   sc.scrollTop = tabScroll[t] || 0;
+  if (t !== "scan" && KEEP?.on) keepOff();
   drawSizer();
   if (S.T && (t === "scan" || was === "scan" || t === "mask" || was === "mask")) refresh({ keepHandle: true });
   maskVis();
@@ -5085,7 +5206,8 @@ addEventListener("keydown", (e) => {
   if (k === "n") { e.preventDefault(); togglePanel(); return; }
   if (S.step !== "cut" || insViewOn()) return;
   if (k === "x") { e.preventDefault(); flip("tOver"); return; }
-  if (k === "t") { e.preventDefault(); flip("tSlices"); }
+  if (k === "t") { e.preventDefault(); flip("tSlices"); return; }
+  if (k === "k") { e.preventDefault(); keepToggle(); }
 });
 
 // the tool rail's tips: name, key and a line on what it does, beside the button
