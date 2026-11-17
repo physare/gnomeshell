@@ -43,13 +43,14 @@ import cleanup as scanclean  # noqa: E402
 import paint_mask  # noqa: E402
 import bambu  # noqa: E402
 import gnomework as gw  # noqa: E402
+import winfocus  # noqa: E402
 
 HOME_DOCS = os.path.join(os.path.expanduser("~"), "Documents")
 OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expanduser("~"), "Mold Shells")
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.17.2"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.17.3"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -2215,8 +2216,9 @@ class Handler(BaseHTTPRequestHandler):
                 target = os.path.join(folder, os.path.basename(folder) + " - paint mask.3mf") if data.get("what") == "mask" else \
                     os.path.join(folder, "shell.3mf") if data.get("what") == "bambu" else \
                     os.path.join(folder, "test_slices.3mf") if data.get("what") == "slices" else folder
-                if hasattr(os, "startfile"):
-                    os.startfile(target)  # Windows: opens with the program set for .3mf, or Explorer
+                if not os.path.exists(target):
+                    raise RuntimeError("That isn't saved yet. Build first.")
+                winfocus.open_front(target)  # the program set for .3mf, or Explorer, brought to the front
                 return self._send(200, {"opened": target})
         except (ValueError, RuntimeError) as e:  # a bad value, or a job that can't run now: say why
             print("  Refused:", e, flush=True)
@@ -2244,8 +2246,7 @@ class Handler(BaseHTTPRequestHandler):
             sc.stop(sid)
             return {"ok": True}
         if p == "/api/phone/folder":
-            if hasattr(os, "startfile"):
-                os.startfile(folder)
+            winfocus.open_front(folder)
             return {"opened": folder}
         if p == "/api/phone/open":
             stl = os.path.join(folder, "model.stl")
