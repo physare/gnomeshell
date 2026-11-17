@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.16.8"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.16.9"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -3729,7 +3729,14 @@ async function startTabs() {
 const MASK_OUT = 100;
 const MASK = { f: null, nv: 0, nv0: 0, nt: 0, V: null, N: null, T: null, A: null, S: null, ns: 0, view: null, stamp: null, tick: 0, edge: 1, name: null,
   brush: "add", tool: "view", size: 6, stroke: null, undo: [], redo: [], mesh: null, saveT: 0, info: null, feats: null };
-const MASK_ON = new THREE.Color("#4f86c6");
+// colours for painting the area: the model, and the area picked for the mask
+const MASK_LOOKS = {
+  blue: { model: COL.latex, on: new THREE.Color("#4f86c6") },
+  orange: { model: new THREE.Color("#b9bec4"), on: new THREE.Color("#ef8a2c") },
+  magenta: { model: new THREE.Color("#eeeeee"), on: new THREE.Color("#c2348f") },
+  green: { model: new THREE.Color("#6f7680"), on: new THREE.Color("#5fd16a") },
+};
+let MASK_LOOK = MASK_LOOKS.blue;
 const maskEsc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[c]);
 const maskTab = () => !!(S.step === "cut" && S.scan && latexMesh && latexTri && MASK.f && curTab() === "mask" && !insViewOn() && !busyNow());
 groups.maskLine = new THREE.Group(); groups.maskMarks = new THREE.Group(); scene.add(groups.maskLine, groups.maskMarks);
@@ -3766,7 +3773,7 @@ function maskTopo() {
   for (let v = 0; v < nv; v++) { const l = Math.hypot(vnor[v * 3], vnor[v * 3 + 1], vnor[v * 3 + 2]) || 1; vnor[v * 3] /= l; vnor[v * 3 + 1] /= l; vnor[v * 3 + 2] /= l; }
   // the mask's own copy of the model starts as the scan's triangles
   Object.assign(MASK, { nv0: nv, nv, nt: n, capV: nv, capT: n, V: vpos, N: vnor, T: vid, A: adj, S: new Int32Array(0), ns: 0,
-    f: new Float32Array(nv).fill(MASK_OUT), col: new Float32Array(nv * 3), stamp: new Uint32Array(n), tick: 0, viewDirty: true, edge: el / Math.min(n, 3000) || 1 });
+    f: new Float32Array(nv).fill(MASK_OUT), col: new Float32Array(nv * 3), stamp: new Uint32Array(n), tick: 0, viewDirty: true, edge: el / Math.min(n, 3000) || 1, cav: null });
 }
 // ---- finer detail where the mask's edge runs: each split puts a new corner
 // halfway along one edge and cuts both triangles on it in two. The splits are
@@ -3920,12 +3927,47 @@ function maskViewSync() {
   MASK.view.geometry.setDrawRange(0, MASK.nt * 3);
   maskVis();
 }
+// how far each corner stands above or sinks below the surface round it
+// (over about 1.5 mm), scaled so the plainest bumps and hollows show: a
+// shade per corner, lighter on ridges and darker in grooves
+function maskDetail() {
+  if (MASK.cav && MASK.cav.length >= MASK.nv) return MASK.cav;
+  if (MASK.cav && MASK.cav.length >= MASK.nv0) { MASK.cav = maskExtend(MASK.cav); return MASK.cav; }
+  const n = MASK.nv, V = MASK.V, N = MASK.N, T = MASK.T, nt = MASK.nt;
+  const E = [];
+  for (let i = 0; i < nt * 3; i++) {
+    const a = T[i], b = T[i - (i % 3) + ((i % 3) + 1) % 3];
+    if (a < b) E.push(a, b);
+  }
+  let el = 0; const ne = E.length / 2;
+  for (let k = 0; k < Math.min(ne, 5000); k++) { const a = E[2 * k] * 3, b = E[2 * k + 1] * 3; el += Math.hypot(V[a] - V[b], V[a + 1] - V[b + 1], V[a + 2] - V[b + 2]); }
+  el /= Math.max(1, Math.min(ne, 5000));
+  let P = Float64Array.from(V.subarray(0, n * 3));
+  const its = Math.min(60, Math.max(3, Math.round((1.5 / Math.max(el, 1e-3)) ** 2)));
+  for (let it = 0; it < its; it++) {
+    const sum = new Float64Array(n * 3), cnt = new Float64Array(n);
+    for (let k = 0; k < ne; k++) {
+      const a = E[2 * k], b = E[2 * k + 1];
+      for (let j = 0; j < 3; j++) { sum[a * 3 + j] += P[b * 3 + j]; sum[b * 3 + j] += P[a * 3 + j]; }
+      cnt[a]++; cnt[b]++;
+    }
+    for (let v = 0; v < n; v++) if (cnt[v]) for (let j = 0; j < 3; j++) sum[v * 3 + j] = 0.5 * P[v * 3 + j] + 0.5 * sum[v * 3 + j] / cnt[v]; else for (let j = 0; j < 3; j++) sum[v * 3 + j] = P[v * 3 + j];
+    P = sum;
+  }
+  const d = new Float32Array(n);
+  for (let v = 0; v < n; v++) d[v] = (V[v * 3] - P[v * 3]) * N[v * 3] + (V[v * 3 + 1] - P[v * 3 + 1]) * N[v * 3 + 1] + (V[v * 3 + 2] - P[v * 3 + 2]) * N[v * 3 + 2];
+  const sample = []; for (let v = 0; v < n; v += Math.max(1, Math.floor(n / 20000))) sample.push(Math.abs(d[v]));
+  sample.sort((x, y) => x - y);
+  const sc = sample[Math.floor(sample.length * 0.9)] || 1;
+  for (let v = 0; v < n; v++) d[v] = Math.max(0.25, Math.min(1.7, 1 + d[v] / sc));
+  return (MASK.cav = d);
+}
 function maskPaintAll() {
   if (!MASK.f || !latexMesh) return;
-  const c = MASK.col, f = MASK.f;
+  const c = MASK.col, f = MASK.f, sh = $("#maskDetail")?.checked ? maskDetail() : null;
   for (let v = 0; v < MASK.nv; v++) {
-    const col = f[v] < 0 ? MASK_ON : COL.latex;
-    c[v * 3] = col.r; c[v * 3 + 1] = col.g; c[v * 3 + 2] = col.b;
+    const col = f[v] < 0 ? MASK_LOOK.on : MASK_LOOK.model, k = sh ? sh[v] : 1;
+    c[v * 3] = Math.min(1, col.r * k); c[v * 3 + 1] = Math.min(1, col.g * k); c[v * 3 + 2] = Math.min(1, col.b * k);
   }
   maskViewSync();
   maskOutline();
@@ -3968,6 +4010,7 @@ function maskMark() {
 }
 function maskChanged() {
   if (MASK.feats && !MASK.featEdit) maskFeatsDrop(); // edited by hand: the openings stay as they are
+  maskEditAgain();
   maskStats(); maskPaintAll();
   clearTimeout(MASK.saveT);
   const nv = MASK.nv0, name = MASK.name, f = maskField().slice(), S = MASK.S.slice(0, 2 * MASK.ns);
@@ -4145,8 +4188,16 @@ function maskShapeEnd() {
   const idx = [...seen];
   maskApply(idx, idx.map(sd)); maskChanged();
 }
+// back to the painted area after a build: the built mask is hidden so the
+// paint shows, and Build paint mask makes it again
+function maskEditAgain(quiet) {
+  if (!MASK.mesh || !$("#maskShow").checked) return;
+  $("#maskShow").checked = false; maskVis();
+  if (!quiet) toast("The built mask is hidden so you can change the painted area. Press Build paint mask again when you're done.", true);
+}
 function maskSetTool(t) {
   MASK.tool = MASK.tool === t ? "view" : t; // clicking the picked tool puts it down
+  if (MASK.tool !== "view") maskEditAgain();
   $$("#maskTool [data-tool]").forEach((x) => x.classList.toggle("on", x.dataset.tool === MASK.tool));
   $("#maskSizeBox").hidden = MASK.tool !== "brush";
   maskVis();
@@ -4259,7 +4310,7 @@ $("#maskFind").onclick = () => {
     maskSetF(base); MASK.featBase = maskExtend(base);
     // the big ones (the eyes) are cut out; much smaller finds are listed but left filled in
     const wMax = Math.max(...r.features.map((x) => x.width_mm));
-    MASK.feats = r.features.map((x) => ({ ...x, d: maskExtend(maskFromB64(x.dist)), on: x.width_mm >= 0.65 * wMax }));
+    MASK.feats = r.features.map((x) => ({ ...x, d: maskExtend(maskFromB64(x.dist)), on: x.cut ?? x.width_mm >= 0.65 * wMax }));
     $("#maskFeat").hidden = false; maskFeatRender(); maskFeatEdit();
     const n = MASK.feats.filter((x) => x.on).length, rest = MASK.feats.length - n;
     toast(`Cut out ${n} opening${n === 1 ? "" : "s"}, numbered in the view.${rest ? ` ${rest} smaller raised spot${rest === 1 ? " is" : "s are"} listed but left filled in.` : ""} Press Fill in or Cut out to change any.`, true);
@@ -4302,6 +4353,20 @@ $("#maskBuild").onclick = () => {
     toast(`Saved ${r.files[0].name} in the scan's folder, dome up and ready to slice (it needs supports under the dome).`, true);
   }, true);
 };
+$("#maskEdit").onclick = () => { if (!$("#maskShow").checked) { toast("Change the painted area, then press Build paint mask again.", true); return; } maskEditAgain(); };
+// how the model and the picked area look while painting
+function maskLook() {
+  try { localStorage.setItem("gs.maskLook", JSON.stringify({ colors: $("#maskColors").value, detail: $("#maskDetail").checked })); } catch (e) { /* no storage */ }
+  MASK_LOOK = MASK_LOOKS[$("#maskColors").value] || MASK_LOOKS.blue;
+  maskPaintAll();
+}
+try {
+  const st = JSON.parse(localStorage.getItem("gs.maskLook") || "{}") || {};
+  if (MASK_LOOKS[st.colors]) { $("#maskColors").value = st.colors; MASK_LOOK = MASK_LOOKS[st.colors]; }
+  if (st.detail) $("#maskDetail").checked = true;
+} catch (e) { /* no storage */ }
+$("#maskColors").onchange = maskLook;
+$("#maskDetail").onchange = maskLook;
 $("#maskOpen").onclick = () => api("/api/open", { what: "mask" }).catch((e) => toast(e.message));
 $("#maskFolder").onclick = () => api("/api/open", { what: "folder" }).catch((e) => toast(e.message));
 
