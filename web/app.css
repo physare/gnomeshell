@@ -670,3 +670,4 @@ body.no-panel .panel { display: none; }
 .mask-feats > div.off > span { opacity: .5; }
 .mask-feats .num { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--gold-soft, #3a2f1c); color: var(--gold-ink, #f0b85a); font: 600 11px var(--mono); }
 #keepGo { grid-column: 1 / -1; }
+#sendSlices { width: 100%; margin-bottom: 8px; }
