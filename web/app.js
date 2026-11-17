@@ -4197,7 +4197,7 @@ function maskEditAgain(quiet) {
 }
 function maskSetTool(t) {
   MASK.tool = MASK.tool === t ? "view" : t; // clicking the picked tool puts it down
-  if (MASK.tool !== "view") maskEditAgain();
+  if (MASK.tool !== "view") { maskEditAgain(); $("#tMaskArea").checked = true; }
   $$("#maskTool [data-tool]").forEach((x) => x.classList.toggle("on", x.dataset.tool === MASK.tool));
   $("#maskSizeBox").hidden = MASK.tool !== "brush";
   maskVis();
@@ -4323,15 +4323,19 @@ function maskDropBuilt() {
 }
 function maskVis() {
   const on = S.step === "cut" && curTab() === "mask";
+  const area = on && $("#tMaskArea").checked;
+  $("#tMask").checked = $("#maskShow").checked;
   groups.mask.visible = on && $("#maskShow").checked;
-  groups.maskLine.visible = groups.maskMarks.visible = on;
+  groups.maskLine.visible = groups.maskMarks.visible = area;
   // the mask's own (finer) copy of the model stands in for the scan on this tab
-  if (MASK.view) MASK.view.visible = on;
-  if (latexMesh) latexMesh.material.visible = !on || !MASK.view;
+  if (MASK.view) MASK.view.visible = area;
+  if (latexMesh) latexMesh.material.visible = !area || !MASK.view;
   canvas.style.cursor = maskTab() && MASK.tool !== "view" && MASK.tool !== "brush" ? "crosshair" : canvas.style.cursor === "crosshair" && S.mode !== "draw" && !SPLIT.draw ? "" : canvas.style.cursor;
   if (!maskTab() && $("#brushRing")) $("#brushRing").hidden = true;
 }
 $("#maskShow").onchange = maskVis;
+$("#tMask").onchange = () => { $("#maskShow").checked = $("#tMask").checked; maskVis(); };
+$("#tMaskArea").onchange = maskVis;
 $("#maskBuild").onclick = () => {
   if (!MASK.f || !S.scan) return;
   if (!maskField().some((x) => x < 0)) { toast("Select the area the mask should cover first."); return; }
