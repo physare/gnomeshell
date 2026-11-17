@@ -13,6 +13,7 @@ Nothing here needs Blender. On anything but Windows it only opens the target.
 """
 
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -67,6 +68,14 @@ def _windows():
 
     _u.EnumWindows(_ENUM(each), 0)
     return out
+
+
+def _class_of(h):
+    if not h:
+        return ""
+    cls = ctypes.create_unicode_buffer(256)
+    _u.GetClassNameW(h, cls, 256)
+    return cls.value
 
 
 def _exe_of(h):
@@ -146,8 +155,12 @@ def _watch(target, before, timeout):
         if is_dir:
             # Explorer moves the folder between windows for a moment while it
             # opens: keep the folder's window in front until it settles.
+            # Only take it back from Explorer itself (or GnomeShell's window
+            # that was clicked): a window you switch to stays in front.
             fg = _u.GetForegroundWindow()
-            pick = [h for _, h in found if h != fg] if found and fg not in {h for _, h in found} else []
+            ours = {h for _, h in found}
+            took = fg in before or _class_of(fg) == "CabinetWClass"
+            pick = [h for _, h in found] if found and fg not in ours and took else []
         else:
             pick = [h for fresh, h in found if h not in done and (fresh or not done)]
         if pick and tries < 8:
@@ -179,7 +192,12 @@ def open_front(target, timeout=45.0):
         except OSError:
             before = set()
     try:
-        os.startfile(target)
+        if _WIN and os.path.isdir(target):
+            # A window of its own (/n): Windows 11 otherwise folds the folder
+            # into an Explorer window already open, as a tab behind the one showing.
+            subprocess.Popen(f'explorer.exe /n,"{target}"')
+        else:
+            os.startfile(target)
     except OSError as e:
         raise RuntimeError(f"Windows couldn't open {os.path.basename(target)}: {e.strerror or e}")
     if _WIN:
