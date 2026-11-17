@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.16.6"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.16.7"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -96,7 +96,7 @@ for (const g of gizmos) {
   g.addEventListener("dragging-changed", (e) => { orbit.enabled = !e.value; if (!e.value) { renderCuts(); refresh(); } });
   g.addEventListener("objectChange", () => onHandleMove(g.mode));
 }
-const gizmoHot = () => gizmos.some((g) => g.dragging || g.axis);
+const gizmoHot = () => gizmos.some((g) => g.dragging || g.axis) || !!(KEEP?.on && (keepRot.dragging || keepRot.axis)); // var KEEP, keepRot: set further down
 const attachHandle = () => gizmos.forEach((g) => { if (g.object !== handle) g.attach(handle); });
 const detachHandle = () => gizmos.forEach((g) => g.detach());
 // where the arrow and a ring cross, only the arrow takes the drag
@@ -483,7 +483,7 @@ function drawScene(T, keepHandle) {
   });
   groups.planes.visible = S.step === "cut" && $("#tPlanes").checked;
   const inf = infoOf(S.active), c = cutById(S.active);
-  if (inf && inf.valid && c && S.step === "cut" && $("#tPlanes").checked && (T.segCount.get(c.id) || !T.innerCount.get(c.id))) {
+  if (inf && inf.valid && c && S.step === "cut" && $("#tPlanes").checked && (T.segCount.get(c.id) || !T.innerCount.get(c.id)) && !KEEP?.on) {
     if (!keepHandle) placeHandle(inf, c);
     attachHandle();
   } else detachHandle();
@@ -1339,6 +1339,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (SEAM.picking || WEB.picking || SPOUT.picking || splitHandleAt(e) || maskTab()) return; // their own click handlers deal with it
   const kh = e.button === 0 && !e.shiftKey ? keepAt(e) : null;
   if (kh) { keepStart(e, kh); e.stopImmediatePropagation(); return; }
+  if (KEEP?.on && (keepRot.axis || keepRot.dragging)) return; // the keep box's rings take it
   const sh = e.button === 0 && S.step === "cut" ? sizerAt(e) : null;
   if (sh) { sizerStart(e, sh); e.stopImmediatePropagation(); return; }
   const ih = e.button === 0 && S.step === "cut" ? insHandleAt(e) : null;
@@ -2500,13 +2501,23 @@ function sizerEnd(e) {
 }
 
 // ------------------------------------------------------------ keep box
-// A box round the scan with a green dot on each side. Drag the dots so it
-// holds just the latex mold (the bottom just above the bench or table it was
-// scanned on); what's outside shows in red. Keep what's in the box cuts the
-// rest away in the engine and closes the cut flat. Ctrl+Z puts it back.
-var KEEP = { on: false, lo: null, hi: null, drag: null, ghost: null }; // var: handlers can run before this line
+// A box round the scan with a green dot on each side, and rings to turn it.
+// Drag the dots so it holds just the latex mold (the bottom just above the
+// bench or table it was scanned on); drag a ring to turn or tilt the box to
+// match the bench. What's outside shows in red. Keep what's in the box cuts
+// the rest away in the engine and closes the cut flat; a tilted box's bottom
+// ends up level. Ctrl+Z puts it back.
+var KEEP = { on: false, c: null, h: null, q: null, drag: null, ghost: null }; // var: handlers can run before this line
 groups.keep = new THREE.Group(); scene.add(groups.keep);
 renderer.localClippingEnabled = true;
+var keepPivot = new THREE.Object3D(); scene.add(keepPivot);
+var keepRot = new TransformControls(camera, canvas);
+keepRot.setMode("rotate"); keepRot.setSpace("local"); keepRot.setSize(0.9);
+scene.add(keepRot.getHelper ? keepRot.getHelper() : keepRot);
+keepRot.addEventListener("dragging-changed", (e) => { orbit.enabled = !e.value; if (!e.value) keepDraw(); });
+keepRot.addEventListener("mouseDown", () => keepRot.setRotationSnap(shiftDown ? THREE.MathUtils.degToRad(15) : null));
+keepRot.addEventListener("objectChange", () => { if (KEEP.on) { KEEP.q.copy(keepPivot.quaternion); keepDraw(); } });
+function keepAxis(i) { return new V3(i === 0 ? 1 : 0, i === 1 ? 1 : 0, i === 2 ? 1 : 0).applyQuaternion(KEEP.q); }
 function keepToggle() { if (KEEP.on) keepOff(); else keepOnNow(); }
 function keepOnNow() {
   if (!S.scan || !latexMesh || S.step !== "cut") return toast("Load a scan first.");
@@ -2515,75 +2526,81 @@ function keepOnNow() {
   if (insViewOn()) setInsView(false);
   const box = new THREE.Box3().setFromBufferAttribute(latexMesh.geometry.attributes.position);
   const pad = Math.max(1, size() * 0.01);
-  KEEP.lo = box.min.clone().subScalar(pad); KEEP.hi = box.max.clone().addScalar(pad);
+  box.expandByScalar(pad);
+  KEEP.c = box.getCenter(new V3()); KEEP.h = box.getSize(new V3()).multiplyScalar(0.5); KEEP.q = new THREE.Quaternion();
   KEEP.on = true; KEEP.drag = null;
+  detachHandle();
   $("#keepBox").hidden = false;
   $("#keepBox").scrollIntoView({ block: "nearest" });
   $$("[data-keepbox]").forEach((b) => { b.classList.add("on"); b.setAttribute("aria-pressed", "true"); });
   KEEP.ghost = new THREE.Mesh(latexMesh.geometry, new THREE.MeshBasicMaterial({ color: "#e05a4a", transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide }));
   KEEP.ghost.renderOrder = 3;
   groups.keep.add(KEEP.ghost);
+  keepRot.attach(keepPivot);
   drawSizer(); keepDraw();
   viewFrom("front");
 }
 function keepOff() {
   if (!KEEP?.on) return;
   KEEP.on = false; KEEP.drag = null; KEEP.ghost = null;
+  keepRot.detach();
   groups.keep.clear();
   if (latexMesh) { latexMesh.material.clippingPlanes = null; latexMesh.material.needsUpdate = true; }
   $("#keepBox").hidden = true;
   $$("[data-keepbox]").forEach((b) => { b.classList.remove("on"); b.setAttribute("aria-pressed", "false"); });
   orbit.enabled = true; canvas.style.cursor = "";
   drawSizer();
+  if (S.T) refresh({ keepHandle: true }); // the open cut's handle comes back
 }
 const KEEP_SIDES = [[0, -1], [0, 1], [1, -1], [1, 1], [2, -1], [2, 1]];
+function keepFace(i, sgn) { return KEEP.c.clone().addScaledVector(keepAxis(i), sgn * KEEP.h.getComponent(i)); }
 function keepDraw() {
   const g = groups.keep;
   for (const o of g.children.filter((x) => x !== KEEP.ghost)) { g.remove(o); o.geometry?.dispose(); }
   if (!KEEP?.on) return;
-  const { lo, hi } = KEEP, c = lo.clone().add(hi).multiplyScalar(0.5), d = hi.clone().sub(lo);
-  const box = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(d.x, d.y, d.z)), new THREE.LineBasicMaterial({ color: "#6fe08a", transparent: true, opacity: 0.9, depthTest: false }));
-  box.position.copy(c); box.renderOrder = 7; g.add(box);
+  const { c, h, q } = KEEP;
+  keepPivot.position.copy(c); if (!keepRot.dragging) keepPivot.quaternion.copy(q);
+  const box = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(2 * h.x, 2 * h.y, 2 * h.z)), new THREE.LineBasicMaterial({ color: "#6fe08a", transparent: true, opacity: 0.9, depthTest: false }));
+  box.position.copy(c); box.quaternion.copy(q); box.renderOrder = 7; g.add(box);
   // a faint sheet where the bottom cuts, to line up with the bench top
-  const sheet = new THREE.Mesh(new THREE.PlaneGeometry(d.x, d.y), new THREE.MeshBasicMaterial({ color: "#6fe08a", transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide }));
-  sheet.position.set(c.x, c.y, lo.z); sheet.renderOrder = 4; g.add(sheet);
+  const sheet = new THREE.Mesh(new THREE.PlaneGeometry(2 * h.x, 2 * h.y), new THREE.MeshBasicMaterial({ color: "#6fe08a", transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide }));
+  sheet.position.copy(keepFace(2, -1)); sheet.quaternion.copy(q); sheet.renderOrder = 4; g.add(sheet);
   const hs = Math.max(2.5, size() * 0.014);
   for (const [i, sgn] of KEEP_SIDES) {
-    const p = c.clone(); p.setComponent(i, sgn < 0 ? lo.getComponent(i) : hi.getComponent(i));
     const hot = KEEP.drag && KEEP.drag.i === i && KEEP.drag.sgn === sgn;
     const m = new THREE.Mesh(new THREE.SphereGeometry(hs * (hot ? 1.3 : 1), 16, 12), new THREE.MeshBasicMaterial({ color: i === 2 && sgn < 0 ? "#b6ffc6" : "#6fe08a", depthTest: false, transparent: true, opacity: 0.95 }));
-    m.position.copy(p); m.renderOrder = 8; m.userData.keep = { i, sgn }; g.add(m);
+    m.position.copy(keepFace(i, sgn)); m.renderOrder = 8; m.userData.keep = { i, sgn }; g.add(m);
   }
   // the model shows only inside the box; the red copy shows what goes
-  const pl = [
-    new THREE.Plane(new V3(1, 0, 0), -lo.x), new THREE.Plane(new V3(-1, 0, 0), hi.x),
-    new THREE.Plane(new V3(0, 1, 0), -lo.y), new THREE.Plane(new V3(0, -1, 0), hi.y),
-    new THREE.Plane(new V3(0, 0, 1), -lo.z), new THREE.Plane(new V3(0, 0, -1), hi.z),
-  ];
+  const pl = [];
+  for (const [i, sgn] of KEEP_SIDES) { const n = keepAxis(i).multiplyScalar(-sgn); pl.push(new THREE.Plane().setFromNormalAndCoplanarPoint(n, keepFace(i, sgn))); }
   if (latexMesh) { latexMesh.material.clippingPlanes = pl; latexMesh.material.needsUpdate = true; }
   const bi = $("#keepBottom");
-  if (document.activeElement !== bi) bi.value = lo.z.toFixed(1);
+  if (document.activeElement !== bi) bi.value = keepFace(2, -1).z.toFixed(1);
+  $("#keepSquare").disabled = q.angleTo(new THREE.Quaternion()) < 1e-4;
 }
 function keepAt(e) {
-  if (!KEEP.on || !groups.keep.children.length) return null;
+  if (!KEEP?.on || !groups.keep.children.length || keepRot.dragging) return null;
   setRay(e);
   const hit = ray.intersectObjects(groups.keep.children.filter((o) => o.userData.keep), false)[0];
   return hit ? hit.object.userData.keep : null;
 }
 function keepStart(e, h) {
-  const { lo, hi } = KEEP, c = lo.clone().add(hi).multiplyScalar(0.5);
-  const from = c.clone(); from.setComponent(h.i, 0);
-  const u = new V3(); u.setComponent(h.i, 1);
-  KEEP.drag = { ...h, from, u, was: [lo.clone(), hi.clone()] };
+  // the dot slides along its side's axis; the side across from it stays put
+  const u = keepAxis(h.i).multiplyScalar(h.sgn), other = keepFace(h.i, -h.sgn);
+  KEEP.drag = { ...h, u, other, len0: 2 * KEEP.h.getComponent(h.i), was: [KEEP.c.clone(), KEEP.h.clone()] };
   orbit.enabled = false; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = "grabbing";
   keepDraw();
 }
+function keepSetLen(D, len) {
+  len = Math.max(Math.max(1, size() * 0.02), Math.round(len * 2) / 2);
+  KEEP.h.setComponent(D.i, len / 2);
+  KEEP.c.copy(D.other).addScaledVector(D.u, len / 2);
+}
 function keepMove(e) {
   const D = KEEP.drag; setRay(e);
-  const t = lineParam(D.from, D.u); if (t == null) return;
-  const v = Math.round(t * 2) / 2, gap = Math.max(1, size() * 0.02);
-  if (D.sgn < 0) KEEP.lo.setComponent(D.i, Math.min(v, KEEP.hi.getComponent(D.i) - gap));
-  else KEEP.hi.setComponent(D.i, Math.max(v, KEEP.lo.getComponent(D.i) + gap));
+  const t = lineParam(D.other, D.u); if (t == null) return;
+  keepSetLen(D, t);
   keepDraw();
 }
 function keepEnd(e) {
@@ -2592,18 +2609,34 @@ function keepEnd(e) {
 }
 function keepDragCancel() {
   const D = KEEP.drag; if (!D) return;
-  [KEEP.lo, KEEP.hi] = D.was; KEEP.drag = null; orbit.enabled = true; canvas.style.cursor = "";
+  [KEEP.c, KEEP.h] = D.was; KEEP.drag = null; orbit.enabled = true; canvas.style.cursor = "";
   keepDraw();
 }
 $$("[data-keepbox]").forEach((b) => b.onclick = keepToggle);
 $("#keepCancel").onclick = keepOff;
+$("#keepSquare").onclick = () => {
+  if (!KEEP.on) return;
+  // square to the axes again, round the same middle, big enough to hold the turned box
+  const corners = [];
+  for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) corners.push(new V3(x * KEEP.h.x, y * KEEP.h.y, z * KEEP.h.z).applyQuaternion(KEEP.q).add(KEEP.c));
+  const b = new THREE.Box3().setFromPoints(corners);
+  KEEP.c = b.getCenter(new V3()); KEEP.h = b.getSize(new V3()).multiplyScalar(0.5); KEEP.q = new THREE.Quaternion();
+  keepDraw();
+};
 $("#keepBottom").addEventListener("change", () => {
   const v = parseFloat($("#keepBottom").value); if (!KEEP.on || !isFinite(v)) return;
-  KEEP.lo.z = Math.min(v, KEEP.hi.z - Math.max(1, size() * 0.02)); keepDraw();
+  // move the bottom along the box's own up, by how far its middle is from the height typed
+  const D = { i: 2, u: keepAxis(2).multiplyScalar(-1), other: keepFace(2, 1) };
+  const up = keepAxis(2).z || 1;
+  keepSetLen(D, 2 * KEEP.h.z - (v - keepFace(2, -1).z) / up);
+  keepDraw();
 });
 $("#keepGo").onclick = () => {
-  if (!KEEP?.on) return;
-  const value = { min: KEEP.lo.toArray().map((x) => Math.round(x * 100) / 100), max: KEEP.hi.toArray().map((x) => Math.round(x * 100) / 100) };
+  if (!KEEP.on) return;
+  const r2 = (x) => Math.round(x * 1000) / 1000;
+  const F = new THREE.Matrix4().compose(KEEP.c, KEEP.q, new V3(1, 1, 1)).transpose().toArray(); // transposed: rows, for the engine
+  const frame = [0, 1, 2, 3].map((r) => F.slice(r * 4, r * 4 + 4).map((x) => Math.round(x * 1e6) / 1e6));
+  const value = { min: KEEP.h.toArray().map((x) => r2(-x)), max: KEEP.h.toArray().map(r2), frame };
   withBusy("Keeping what's in the box", async () => {
     const info = await api("/api/prep", { op: "keep_box", value });
     keepOff();

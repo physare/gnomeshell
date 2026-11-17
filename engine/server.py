@@ -47,7 +47,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.16.6"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.16.7"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -1158,7 +1158,7 @@ def job_prep(op, value=None):
         STATE["clean_note"] = (", and ".join(said) + (f" ({round(100 * r['dropped'])}% of the scan's surface)." if r["dropped"] >= 0.005 else "."))
     elif op == "keep_box":
         v = value or {}
-        r = scanclean.keep_box(latex, v["min"], v["max"])
+        r = scanclean.keep_box(latex, v["min"], v["max"], v.get("frame"))
         said = "Kept what's inside the box and closed it flat underneath"
         # the bottom set a little low leaves a thin slice of the bench top: that's a floor now
         r2 = scanclean.clean_scan(latex, bench=False)

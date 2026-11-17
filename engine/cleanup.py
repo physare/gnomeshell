@@ -310,9 +310,12 @@ def clean_scan(obj, min_floor=0.12, bench=True):
     return out
 
 
-def keep_box(obj, lo, hi):
-    """Keep only what's inside the box lo..hi (world coordinates, the scan
-    upright), the biggest piece of it, closed flat where the box cut through.
+def keep_box(obj, lo, hi, frame=None):
+    """Keep only what's inside the box lo..hi, the biggest piece of it, closed
+    flat where the box cut through. lo and hi are in world coordinates, or,
+    with frame (a 4x4 matrix, rows, from the box's own space to the world: a
+    box turned or tilted), in the box's own space. A tilted box's bottom ends
+    up level, so a scan made on a sloping bench stands straight.
     Returns {"dropped": share of the surface removed, "bits": loose pieces
     removed, "open": whether a side or the top of the box cut through what was
     kept, not just the bottom}."""
@@ -324,7 +327,8 @@ def keep_box(obj, lo, hi):
     M = obj.matrix_world.copy()
     bm = bmesh.new()
     bm.from_mesh(me)
-    bm.transform(M)
+    F = Matrix([[float(x) for x in row] for row in frame]) if frame is not None else Matrix.Identity(4)
+    bm.transform(F.inverted() @ M)  # into the box's own space, where the box is square to the axes
     co, tris = _arrays(bm)
     _, _, area0 = _faces(co, tris)
     total0 = float(area0.sum())
@@ -357,7 +361,10 @@ def keep_box(obj, lo, hi):
     _fill_flat(bm, on_box)
     total1 = sum(f.calc_area() for f in bm.faces)
     out = {"dropped": round(max(0.0, 1 - total1 / total0), 3) if total0 else 0.0, "bits": bits, "open": bool(sides)}
-    bm.transform(M.inverted())
+    # back to the world, less the box's tilt: the box's up becomes straight up
+    R = F.to_3x3()
+    tilt = (R @ Vector((0, 0, 1))).normalized().rotation_difference(Vector((0, 0, 1))).to_matrix().to_4x4()
+    bm.transform(M.inverted() @ tilt @ F)
     bm.to_mesh(me)
     bm.free()
     me.update()

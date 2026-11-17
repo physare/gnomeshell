@@ -381,6 +381,9 @@ USE
      misses something, set a box round the mold yourself. Drag the green dot
      on each side of the box so it holds just the latex mold, with the bottom
      (the paler dot, or type it in Bottom at) just above the bench or table.
+     Drag a ring in the middle of the box to turn it round or tilt it to
+     match a sloping bench (Shift: 15 degree steps); the bottom of a tilted
+     box ends up level. Square it up turns it back.
      What's outside the box shows in red. Keep what's in the box cuts the
      rest away and closes the cut flat; a thin slice of bench left under the
      bottom is taken off too. Esc cancels; Ctrl+Z puts the scan back.
