@@ -115,35 +115,52 @@ def _front(h):
         _u.SetForegroundWindow(h)
 
 
+def _is_folder_window(cls, title, name, path):
+    """Explorer's window showing this folder: Windows 11 titles it
+    "<folder> - File Explorer", Windows 10 just "<folder>" (or the full path)."""
+    if cls != "CabinetWClass":
+        return False
+    t = title.lower()
+    return any(t == x or t.startswith(x + " - ") for x in (name, path))
+
+
 def _watch(target, before, timeout):
     is_dir = os.path.isdir(target)
-    name = os.path.basename(os.path.normpath(target)).lower()
+    path = os.path.normpath(target).lower()
+    name = os.path.basename(path)
     prog = "" if is_dir else _program_for(target)
     end = time.time() + timeout
     done = set()
     settle = None
+    tries = 0
     while time.time() < end:
         found = []
         for h, cls, title, exe in _windows():
-            if is_dir:
-                hit = cls == "CabinetWClass" and title.lower() in (name, os.path.normpath(target).lower())
-            else:
-                hit = bool(prog) and exe == prog and bool(title)
+            hit = _is_folder_window(cls, title, name, path) if is_dir else bool(prog) and exe == prog and bool(title)
             if hit:
                 found.append((h not in before, h))
-        # A new window first (the one just opened), then one already open
-        # that the program reused (Bambu Studio opens a file in its window).
+        # A new window first (the one just opened), then one already open that
+        # took it (Windows 11 opens a folder as a tab in an Explorer window
+        # that's already open; Bambu Studio opens a file in its own window).
         found.sort(reverse=True)
-        new = [h for fresh, h in found if h not in done and (fresh or not done)]
-        if new:
+        if is_dir:
+            # Explorer moves the folder between windows for a moment while it
+            # opens: keep the folder's window in front until it settles.
+            fg = _u.GetForegroundWindow()
+            pick = [h for _, h in found if h != fg] if found and fg not in {h for _, h in found} else []
+        else:
+            pick = [h for fresh, h in found if h not in done and (fresh or not done)]
+        if pick and tries < 8:
             try:
-                _front(new[0])
+                _front(pick[0])
             except OSError:
                 pass
-            done.add(new[0])
+            tries += 1
+            done.add(pick[0])
+        if done and settle is None:
             # A program shows a splash before its main window: keep watching a
             # little longer and bring the main one forward too.
-            settle = time.time() + (2.0 if is_dir else 12.0)
+            settle = time.time() + (4.0 if is_dir else 12.0)
         if settle and time.time() > settle:
             return
         time.sleep(0.25)
