@@ -374,8 +374,16 @@ USE
      the floor or table it stood on, and other things that were round it.
      Clean up finds the floor, cuts the scan just above it, takes away
      everything not joined to the latex mold and closes it flat underneath.
-     When a scan comes in with a floor, a banner offers it. Ctrl+Z puts the
-     scan back.
+     If the mold stood on a bench or stool, it finds the bench top too and
+     cuts just above that. When a scan comes in with a floor or a bench, a
+     banner offers it. Ctrl+Z puts the scan back.
+     Keep box (Scan tab, next to Clean up scan, or press K): when Clean up
+     misses something, set a box round the mold yourself. Drag the green dot
+     on each side of the box so it holds just the latex mold, with the bottom
+     (the paler dot, or type it in Bottom at) just above the bench or table.
+     What's outside the box shows in red. Keep what's in the box cuts the
+     rest away and closes the cut flat; a thin slice of bench left under the
+     bottom is taken off too. Esc cancels; Ctrl+Z puts the scan back.
      Paint mask (Mask tab, or press 5): a thin cover that fits over the
      piece with openings to spray through, say to paint the eyes white
      after the whole piece is gray. First select the area to cover: pick
