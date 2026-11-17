@@ -201,9 +201,10 @@
             <div class="inline"><button type="button" class="btn sm" data-prep="cleanup">Clean up scan</button><button type="button" class="btn sm" data-keepbox>Keep box</button></div>
           </div>
           <div class="keep-box" id="keepBox" role="region" aria-label="Keep box" hidden>
-            <p><b>Keep box.</b> Drag the green dots so the box holds just the latex mold. Bring the bottom up to just above the bench or table it sits on. What's outside the box shows in red and is cut away; the cut is closed flat. Shift+drag turns the view. Esc cancels.</p>
+            <p><b>Keep box.</b> Drag the green dots so the box holds just the latex mold. Bring the bottom up to just above the bench or table it sits on. Drag a ring in the middle to turn or tilt the box, say to match a sloping bench (Shift: 15&deg; steps); a tilted bottom ends up level. What's outside the box shows in red and is cut away; the cut is closed flat. Shift+drag turns the view. Esc cancels.</p>
             <div class="inline"><label for="keepBottom">Bottom at (mm)</label><input id="keepBottom" type="number" step="0.5"></div>
             <div class="btn-grid">
+              <button type="button" class="btn" id="keepSquare" title="Turn the box back square to the scan">Square it up</button>
               <button type="button" class="btn" id="keepCancel">Cancel</button>
               <button type="button" class="btn primary" id="keepGo">Keep what's in the box</button>
             </div>
