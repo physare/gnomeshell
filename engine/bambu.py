@@ -94,7 +94,36 @@ class Profiles:
                         continue
                     if name:
                         self.index[kind][name] = p
+        self.models = {}  # printer model name -> model id (N9, N2S), from BBL.json
+        if os.path.isfile(top):
+            for row in data.get("machine_model_list", []):
+                sub = row.get("sub_path")
+                if not sub:
+                    continue
+                try:
+                    with open(os.path.join(bbl_dir, sub), encoding="utf-8") as f:
+                        m = json.load(f)
+                except (OSError, ValueError):
+                    continue
+                if m.get("model_id"):
+                    self.models[_norm(m.get("name") or row.get("name"))] = m["model_id"]
+        if not self.models:  # no index: the model files are the machine/*.json with a model_id
+            for p in glob.glob(os.path.join(bbl_dir, "machine", "*.json")):
+                try:
+                    with open(p, encoding="utf-8") as f:
+                        m = json.load(f)
+                except (OSError, ValueError):
+                    continue
+                if m.get("model_id") and m.get("name"):
+                    self.models[_norm(m["name"])] = m["model_id"]
         self._cache = {}
+
+    def model_id(self, model):
+        """The code Bambu Studio's file should name for a printer model (N9 for an A2L)."""
+        code = self.models.get(_norm(model))
+        if not code:
+            raise SliceError(f"Bambu Studio doesn't list a model code for the {model}. Update Bambu Studio, then try again.")
+        return code
 
     def raw(self, kind, name):
         p = self.index[kind].get(name)
@@ -209,8 +238,38 @@ def check_sliced(path):
     return m.group(1)
 
 
+def _stamp_model(path, code):
+    """Bambu Studio's command line leaves printer_model_id empty in the file it
+    exports (the printer app fills it). Write the code in, so GnomeWork can see
+    which printer the file was sliced for."""
+    tmp = path + ".stamp"
+    with zipfile.ZipFile(path) as zi, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zo:
+        for item in zi.infolist():
+            data = zi.read(item.filename)
+            if item.filename == "Metadata/slice_info.config":
+                text = data.decode("utf-8", "replace")
+                pat = r'(key="printer_model_id"\s+value=")[^"]*(")'
+                if re.search(pat, text):
+                    text = re.sub(pat, lambda m: m.group(1) + code + m.group(2), text)
+                else:
+                    text = re.sub(r"(<plate>)", r'\1<metadata key="printer_model_id" value="' + code + '"/>', text, count=1)
+                data = text.encode("utf-8")
+            zo.writestr(item, data)
+    os.replace(tmp, path)
+
+
+def _studio_error(work):
+    """Bambu Studio puts the reason it stopped in result.json (not on stdout)."""
+    try:
+        with open(os.path.join(work, "result.json"), encoding="utf-8") as f:
+            r = json.load(f)
+    except (OSError, ValueError):
+        return ""
+    return str(r.get("error_string") or "").strip()
+
+
 def slice_plate(studio, src_3mf, out_path, model, layer_mm=0.28, filament="Bambu PLA Basic",
-                nozzle="0.4", timeout=600, log=None):
+                nozzle="0.4", bed="Textured PEI Plate", timeout=600, log=None):
     """Slice src_3mf for a printer model into a plate sliced file at out_path.
     Every layer, the first one too, is layer_mm. Returns the printer model
     code the file names (N9 for an A2L, N2S for an A1)."""
@@ -218,11 +277,16 @@ def slice_plate(studio, src_3mf, out_path, model, layer_mm=0.28, filament="Bambu
     machine = prof.machine(model, nozzle)
     process = prof.process(machine["name"], layer_mm)
     fil = prof.filament(machine["name"], filament)
+    code = prof.model_id(machine.get("printer_model") or model)
     process.update(layer_height=f"{layer_mm:g}", initial_layer_print_height=f"{layer_mm:g}")
+    if bed:
+        process["curr_bed_type"] = bed  # otherwise Cool Plate, and the bed heats to only 35 C
     work = tempfile.mkdtemp(prefix="gs_slice_")
     files = {}
     for kind, p in (("machine", machine), ("process", process), ("filament", fil)):
-        p = dict(p, **{"from": "User", "type": kind})
+        # "system": Bambu Studio refuses a "User" process for a "User" printer
+        # ("not compatible with the process preset") and slices nothing.
+        p = dict(p, **{"from": "system", "type": kind})
         p.pop("inherits", None)
         files[kind] = os.path.join(work, f"{kind}.json")
         with open(files[kind], "w", encoding="utf-8") as f:
@@ -244,8 +308,10 @@ def slice_plate(studio, src_3mf, out_path, model, layer_mm=0.28, filament="Bambu
     if log is not None:
         log.append({"args": args, "code": r.returncode, "out": (r.stdout or "")[-4000:], "err": (r.stderr or "")[-4000:]})
     if not os.path.isfile(tmp_out):
-        tail = ((r.stderr or "") + (r.stdout or "")).strip().splitlines()[-3:]
-        raise SliceError("Bambu Studio couldn't slice the test slices" + (": " + " ".join(tail) if tail else "."))
-    code = check_sliced(tmp_out)
+        why = _studio_error(work) or " ".join(((r.stderr or "") + (r.stdout or "")).strip().splitlines()[-3:])
+        raise SliceError("Bambu Studio couldn't slice the test slices" + (": " + why if why else "."))
+    _stamp_model(tmp_out, code)
+    got = check_sliced(tmp_out)
     shutil.move(tmp_out, out_path)
-    return code
+    shutil.rmtree(work, ignore_errors=True)
+    return got
