@@ -463,7 +463,7 @@
               <button type="button" data-brush="add" class="on" title="Add to the area the mask covers (B)">Add</button>
               <button type="button" data-brush="erase" title="Subtract from the mask: makes an opening (E)">Subtract</button>
             </div>
-            <label class="slider" for="maskSize" id="maskSizeBox" hidden>Brush size<input id="maskSize" type="range" min="1" max="40" step="0.5" value="6"><span class="mono" id="maskSizeV">6 mm</span></label>
+            <label class="slider" for="maskSize" id="maskSizeBox" hidden>Brush size<input id="maskSize" type="range" min="0" max="100" step="1" value="64"><span class="mono" id="maskSizeV">6 mm</span></label>
             <button type="button" class="btn sm" id="maskFind" disabled title="Finds the parts that stand up inside the area you selected, like the eyes, and cuts them out of the mask as openings">Cut out raised features</button>
             <div id="maskFeat" hidden>
               <div id="maskFeatList" class="mask-feats"></div>
@@ -486,6 +486,11 @@
             </div>
             <label class="check" for="mask_fine_edge"><input id="mask_fine_edge" data-set type="checkbox"> Thin edge round the openings <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="The mask tapers down to a fine edge round each opening, so the spray reaches right up to it and the paint line is crisp.">?</span></label>
             <label class="check" for="mask_smooth"><input id="mask_smooth" data-set type="checkbox"> Smooth the surface <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="Smooths out the flat facets of a low-detail scan so they don't print into the mask.">?</span></label>
+            <label class="check" for="mask_lip"><input id="mask_lip" data-set type="checkbox"> Tape lip round the outside edge <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="A collar that stands up off the mask's outside edge, so there's plastic to tape the mask down by while you spray.">?</span></label>
+            <div class="fields" id="maskLipFields">
+              <label for="mask_lip_mm">Lip height (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="How far the lip stands up past the mask's outer face.">?</span><input id="mask_lip_mm" data-set type="number" step="0.5" min="1" max="40"></label>
+              <label for="mask_lip_t_mm">Lip thickness (mm) <span class="help" tabindex="0" role="img" aria-label="Help" data-tip="How thick the lip is. 1.6 is four lines on a 0.4 mm nozzle.">?</span><input id="mask_lip_t_mm" data-set type="number" step="0.1" min="0.4" max="10"></label>
+            </div>
             <label class="check" for="maskShow"><input id="maskShow" type="checkbox" checked> Show the built mask</label>
             <button type="button" class="btn primary wide" id="maskBuild">Build paint mask</button>
             <div id="maskDone" hidden>

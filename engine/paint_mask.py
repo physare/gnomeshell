@@ -50,6 +50,70 @@ def field_from_b64(b64, co, tris):
     return out
 
 
+def screen_mesh(co, tris, splits_b64=""):
+    """The model as the screen has it for painting the mask: corners in the
+    screen's numbering, plus the extra detail it added where the mask's edge
+    runs. Each split (a, b) put a new corner halfway along edge a-b (numbered
+    next) and cut both triangles on that edge in two. Returns (verts, tris)."""
+    co = np.asarray(co, dtype=np.float64)
+    tris = np.asarray(tris, dtype=np.int64)
+    sid, n = screen_ids(co, tris)
+    V = np.zeros((n, 3))
+    ok = sid >= 0
+    V[sid[ok]] = co[ok]
+    T = sid[tris]
+    T = T[(T >= 0).all(1)]
+    try:
+        S = np.frombuffer(base64.b64decode(splits_b64 or ""), dtype="<i4").reshape(-1, 2) if splits_b64 else np.zeros((0, 2), dtype=np.int64)
+    except Exception:
+        raise ValueError("The mask's extra detail didn't come through. Draw it again.")
+    if not len(S):
+        return V, T
+    T = [list(map(int, t)) for t in T]
+    V = list(map(tuple, V))
+    edges = {}
+    for i, (a, b, c) in enumerate(T):
+        for x, y in ((a, b), (b, c), (c, a)):
+            edges.setdefault((min(x, y), max(x, y)), set()).add(i)
+
+    def drop(i):
+        a, b, c = T[i]
+        for x, y in ((a, b), (b, c), (c, a)):
+            edges[(min(x, y), max(x, y))].discard(i)
+
+    def put(i, tri):
+        T[i] = tri
+        a, b, c = tri
+        for x, y in ((a, b), (b, c), (c, a)):
+            edges.setdefault((min(x, y), max(x, y)), set()).add(i)
+    for a, b in S:
+        a, b = int(a), int(b)
+        if not (0 <= a < len(V) and 0 <= b < len(V)):
+            raise ValueError("The mask's extra detail doesn't match this scan. Draw it again.")
+        m = len(V)
+        V.append(tuple((np.array(V[a]) + np.array(V[b])) / 2))
+        for i in list(edges.get((min(a, b), max(a, b)), ())):
+            t = T[i]
+            k = next(k for k in range(3) if {t[k], t[(k + 1) % 3]} == {a, b})
+            p, q, r = t[k], t[(k + 1) % 3], t[(k + 2) % 3]
+            drop(i)
+            put(i, [p, m, r])
+            T.append(None)
+            put(len(T) - 1, [m, q, r])
+    return np.array(V), np.array(T, dtype=np.int64)
+
+
+def field_from_list(b64, n):
+    """The screen's field for its own (finer) mesh: one float32 per corner."""
+    try:
+        f = np.frombuffer(base64.b64decode(b64), dtype="<f4").astype(np.float64)
+    except Exception:
+        raise ValueError("The mask didn't come through. Draw it again.")
+    if len(f) != n:
+        raise ValueError("The mask doesn't match this scan. Draw it again.")
+    return f
+
+
 def to_b64(values):
     return base64.b64encode(np.asarray(values, dtype="<f4").tobytes()).decode("ascii")
 
@@ -225,13 +289,15 @@ def _taubin(P, tris, fixed, passes=4, lam=0.5, mu=-0.53):
 PINHOLE_MM = 12.0  # an opening with a shorter edge than this (about 4 mm across), or round just one corner or two, is filled in
 
 
-def build(co, tris, field, thickness=1.2, gap=0.1, fine_edge=True, edge_mm=0.45, smooth=True):
+def build(co, tris, field, thickness=1.2, gap=0.1, fine_edge=True, edge_mm=0.45, smooth=True, lip_mm=0.0, lip_t_mm=1.6):
     """The mask as a closed mesh: (verts, tris, info).
 
     co, tris: the whole model (world space, mm); field: one value per corner of
     co, below zero where the mask goes. gap: how far the mask sits off the
     model's surface (negative tucks it in, e.g. to fit a cast when the scan is
-    of the latex). fine_edge: thin down to edge_mm round the openings."""
+    of the latex). fine_edge: thin down to edge_mm round the openings.
+    lip_mm: a collar this tall standing up off the outside edge, lip_t_mm
+    thick, to tape the mask down by (0 = none)."""
     co = np.asarray(co, dtype=np.float64)
     tris = np.asarray(tris, dtype=np.int64)
     field = np.asarray(field, dtype=np.float64)
@@ -311,25 +377,79 @@ def build(co, tris, field, thickness=1.2, gap=0.1, fine_edge=True, edge_mm=0.45,
     outer_v = P + N * (gap + t)[:, None]
     V = np.vstack([inner, outer_v])
     F = [patch[:, ::-1], patch + nv]  # inner faces the model, outer faces away
-    ea, eb = bedges[:, 0], bedges[:, 1]
+    lip_mm, lip_t_mm = float(lip_mm or 0), float(lip_t_mm or 0)
+    lip_v = set()
+    if lip_mm > 0 and lip_t_mm > 0:
+        lip_v = {int(v) for i in outer for v in loops[i]}
+    walls = np.array([not (int(a) in lip_v and int(b) in lip_v) for a, b in bedges], dtype=bool) if len(bedges) else np.zeros(0, dtype=bool)
+    ea, eb = bedges[walls, 0], bedges[walls, 1]
     F.append(np.stack([eb + nv, ea + nv, ea], 1))
     F.append(np.stack([eb + nv, ea, eb], 1))
+    if lip_v:
+        # the outside edge's wall becomes a collar: from the inner face out
+        # along the model by lip_t_mm, up lip_mm past the outer face, back in
+        # and down onto the outer face
+        third = {}
+        for x, y, z in patch:
+            third[(int(x), int(y))] = int(z)
+            third[(int(y), int(z))] = int(x)
+            third[(int(z), int(x))] = int(y)
+        lip_e = bedges[~walls]
+        out_dir = np.zeros((len(P), 3))
+        for a, b in lip_e:
+            e = P[b] - P[a]
+            o = np.cross(e, N[a] + N[b])
+            c = third.get((int(a), int(b)))
+            if c is not None and o @ (P[c] - (P[a] + P[b]) / 2) > 0:
+                o = -o
+            ln = np.linalg.norm(o)
+            if ln > 0:
+                out_dir[a] += o / ln
+                out_dir[b] += o / ln
+        # the lip's up and out directions, smoothed along the edge (over about
+        # 3 mm) so it runs as one even collar round bumps in the model
+        Nl = N.copy()
+        for i in outer:
+            lp = np.asarray(loops[i])
+            seg = np.linalg.norm(P[lp] - P[np.roll(lp, -1)], axis=1).mean() or 1.0
+            for _ in range(int(min(200, max(2, (3.0 / seg) ** 2)))):
+                for A in (Nl, out_dir):
+                    A[lp] = 0.25 * A[np.roll(lp, 1)] + 0.5 * A[lp] + 0.25 * A[np.roll(lp, -1)]
+        Nl /= np.maximum(np.linalg.norm(Nl, axis=1), 1e-9)[:, None]
+        vs = np.array(sorted(lip_v))
+        O = out_dir[vs] - Nl[vs] * np.einsum("ij,ij->i", out_dir[vs], Nl[vs])[:, None]
+        O /= np.maximum(np.linalg.norm(O, axis=1), 1e-9)[:, None]
+        base = len(V)
+        k = {int(v): j for j, v in enumerate(vs)}
+        Pv, Nv, tv = P[vs], Nl[vs], t[vs][:, None]
+        foot = Pv + O * lip_t_mm + Nv * gap
+        top_o = Pv + O * lip_t_mm + Nv * (gap + tv + lip_mm)
+        top_i = Pv + Nv * (gap + tv + lip_mm)
+        V = np.vstack([V, foot, top_o, top_i])
+        m = len(vs)
+        prof = lambda v: [v, base + k[v], base + m + k[v], base + 2 * m + k[v], v + nv]  # inner, foot, top out, top in, outer
+        for a, b in lip_e:
+            pa, pb = prof(int(a)), prof(int(b))
+            for s_ in range(4):
+                xa, ya, xb, yb = pa[s_], pa[s_ + 1], pb[s_], pb[s_ + 1]
+                F.append(np.array([[yb, ya, xa], [yb, xa, xb]]))
     F = np.vstack(F)
     area = 0.5 * np.linalg.norm(np.cross(P[patch[:, 1]] - P[patch[:, 0]], P[patch[:, 2]] - P[patch[:, 0]]), axis=1).sum()
     lo, hi = V.min(0), V.max(0)
     info = {"openings": len(holes), "pieces": len(longest), "area_cm2": round(float(area) / 100, 1),
             "size_mm": [round(float(x), 1) for x in hi - lo], "thickness_mm": thickness, "gap_mm": gap,
-            "fine_edge": bool(fine_edge and holes), "smooth": bool(smooth), "triangles": int(len(F))}
+            "fine_edge": bool(fine_edge and holes), "smooth": bool(smooth), "triangles": int(len(F)),
+            "lip_mm": lip_mm if lip_v else 0, "layer_corners": int(nv)}
     return V, F, info
 
 
-def print_pose(V, F):
+def print_pose(V, F, layer=None):
     """Turned so it prints dome up (the side away from the model on top), set
     on the plate at z = 0: the 4x4 that does it."""
     # build() puts the inner layer first and the outer layer second, corner for
     # corner: the mean step from one to the other is the way the mask faces
-    half = len(V) // 2
-    n = (V[half:] - V[:half]).sum(0)
+    half = int(layer) if layer else len(V) // 2
+    n = (V[half:2 * half] - V[:half]).sum(0)
     ln = np.linalg.norm(n)
     R = np.eye(3)
     if ln > 1e-9:
@@ -432,31 +552,43 @@ def find_raised(co, tris, feature_mm=None, most=8, area=None):
     edge[E[x].ravel()] = True
     edge &= area
     t = float(np.percentile(d[area], 70))
-    # the raised corners, with small gaps in a rim closed (grow, fill what the
-    # rim encloses, shrink back)
-    k = int(np.clip(round(1.5 / max(el, 1e-6)), 1, 3))  # about 1.5 mm
-    up = _grow(area & (d > t), E, area, k)
-    low = area & ~up
-    llab = _labels(low, E, len(co))
-    open_ = set(np.unique(llab[edge & low]).tolist())
-    filled = up.copy()
-    for r in np.unique(llab[low]):
-        if r not in open_:
-            filled[llab == r] = True
-    filled = _shrink(filled, E, k) & area
-    lab = _labels(filled, E, len(co))
     tri_area = 0.5 * np.linalg.norm(np.cross(co[tris[:, 1]] - co[tris[:, 0]], co[tris[:, 2]] - co[tris[:, 0]]), axis=1)
     v_area = np.bincount(tris.ravel(), np.repeat(tri_area / 3, 3), len(co))
+    kmax = int(np.clip(round(1.5 / max(el, 1e-6)), 1, 3))  # about 1.5 mm
+
+    def parts(level, k):
+        """Raised parts at this cut-off, with gaps in a rim up to k corners wide
+        closed (grow, fill what the rim encloses, shrink back)."""
+        up = _grow(area & (d > level), E, area, k)
+        low = area & ~up
+        llab = _labels(low, E, len(co))
+        open_ = set(np.unique(llab[edge & low]).tolist())
+        filled = up.copy()
+        for r in np.unique(llab[low]):
+            if r not in open_:
+                filled[llab == r] = True
+        filled = _shrink(filled, E, k) & area
+        lab = _labels(filled, E, len(co))
+        return [lab == r for r in np.unique(lab[filled])]
+    # rounded parts, first with the gaps in a rim closed; where parts run
+    # together into a streak there, again with less closing or a higher cut-off
+    taken = np.zeros(len(co), dtype=bool)
+    found = []
+    for pct in (70, 80, 90):
+        level = float(np.percentile(d[area], pct))
+        for k in range(kmax, -1, -1):
+            for mask in parts(level, k):
+                m = np.flatnonzero(mask)
+                if len(m) < max(10, 0.002 * area.sum()) or edge[m].any() or taken[m].mean() > 0.3:
+                    continue
+                c = co[m].mean(0)
+                w = float(np.linalg.norm(co[m] - c, axis=1).max() * 2)
+                if v_area[m].sum() < 0.3 * np.pi * (w / 2) ** 2:
+                    continue  # a long thin streak, not a rounded part
+                taken |= mask
+                found.append((mask, m, c, w))
     out = []
-    for r in np.unique(lab[filled]):
-        mask = lab == r
-        m = np.flatnonzero(mask)
-        if len(m) < max(10, 0.002 * area.sum()) or edge[m].any():
-            continue
-        c = co[m].mean(0)
-        w = float(np.linalg.norm(co[m] - c, axis=1).max() * 2)
-        if v_area[m].sum() < 0.3 * np.pi * (w / 2) ** 2:
-            continue  # a long thin streak, not a rounded part
+    for mask, m, c, w in found:
         cross = E[mask[E[:, 0]] != mask[E[:, 1]]]
         inside = np.where(mask[cross[:, 0]], cross[:, 0], cross[:, 1])
         outside = np.where(mask[cross[:, 0]], cross[:, 1], cross[:, 0])
