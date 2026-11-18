@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.17.3"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.17.4"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -3724,7 +3724,8 @@ function sentText(name, r) {
   const n = r.prints.length;
   const where = n > 1 ? `${n} prints in ${r.printer}'s queue (they didn't fit on one plate)` : `${r.printer}'s queue`;
   const next = r.ready ? `${r.printer} is free: press Start in GnomeWork's Print Queue and tick Bed is clear.`
-    : `It waits its turn${r.prints[0]?.ahead ? ` behind ${r.prints[0].ahead} print${r.prints[0].ahead === 1 ? "" : "s"}` : ""}. Start it in GnomeWork when ${r.printer} is free.`;
+    : `It waits its turn${r.prints[0]?.ahead ? ` behind ${r.prints[0].ahead} print${r.prints[0].ahead === 1 ? "" : "s"}` : ""}.`
+      + (r.prints[0]?.problem ? ` GnomeWork says: ${r.prints[0].problem}` : ` Start it in GnomeWork when ${r.printer} is free.`);
   return `${name}: test slices ${sizes} are in ${where}. ${next}`;
 }
 // the tabs you had open come back when GnomeShell starts

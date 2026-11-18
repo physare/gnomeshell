@@ -50,7 +50,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.17.3"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.17.4"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -900,6 +900,21 @@ def _slicer_for(settings):
     return studio, bambu.Profiles(bambu.profiles_dir(studio))
 
 
+MAX_LAYER_MM = 0.28  # the thickest layer a 0.4 mm nozzle prints well (Bambu's own Extra Draft)
+MIN_LAYER_MM = 0.08
+
+
+def _layer_for(thick_mm):
+    """The layer height that prints thick_mm in whole layers, none over 0.28 mm:
+    0.56 mm is two 0.28 mm layers, 1 mm is four 0.25 mm layers."""
+    n = max(1, math.ceil(thick_mm / MAX_LAYER_MM - 1e-6))
+    layer = thick_mm / n
+    if layer < MIN_LAYER_MM - 1e-9:
+        raise RuntimeError(f"A {thick_mm:g} mm test slice is thinner than one printed layer. Set Test slice thickness to "
+                           f"{MIN_LAYER_MM:g} mm or more under Settings, Test slice.")
+    return round(layer, 4)
+
+
 def job_send_test(cuts, settings, pieces=None, frame=None):
     """Send test slices: the test slice at the scan's size and at a second size
     (Second size mm wider across the cut-out), each with its size cut into its
@@ -912,7 +927,8 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
         raise RuntimeError("Load a scan first.")
     check_settings(settings)
     t0 = time.time()
-    url, token = settings.get("gnomework_url") or gw.DEFAULT_URL, settings.get("gnomework_token") or ""
+    url = settings.get("gnomework_url") or gw.DEFAULT_URL
+    token = settings.get("gnomework_token") or load_settings().get("gnomework_token") or ""
 
     progress("Asking GnomeWork which printers are free")
     rows = gw.printers(url, token)
@@ -952,7 +968,7 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
                       test_slice_band=float(settings["test_slice_band"]), test_slice_whole=bool(settings["test_slice_whole"]),
                       pour_extend_mm=settings["pour_extend_mm"], pour_flare_deg=settings["pour_flare_deg"],
                       spouts=_spouts(latex))
-    layer = float(settings["test_slice_mm"]) / 2  # two layers
+    layer = _layer_for(float(settings["test_slice_mm"]))
     items, labels = [], []
     for k, size in enumerate(sizes):
         label = _mm_text(size)
@@ -1005,9 +1021,16 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
         ms.write_3mf(src, named, W, arrange=False, keep=True)
         progress(f"Slicing the {what} test slice{'s' if len(sizes_here) > 1 else ''} in Bambu Studio for {row['model']}")
         dst = os.path.join(send_dir, f"{name} test slices {what}.gcode.3mf")
-        bambu.slice_plate(studio, src, dst, row["model"], layer_mm=layer, filament=settings.get("print_filament") or "Bambu PLA Basic")
-        progress(f"Putting it in {row['name']}'s queue")
-        ans = gw.queue_file(url, token, row["id"], dst, f"{name} test slice{'s' if len(sizes_here) > 1 else ''} {what}")
+        try:
+            bambu.slice_plate(studio, src, dst, row["model"], layer_mm=layer, filament=settings.get("print_filament") or "Bambu PLA Basic")
+            progress(f"Putting it in {row['name']}'s queue")
+            ans = gw.queue_file(url, token, row["id"], dst, f"{name} test slice{'s' if len(sizes_here) > 1 else ''} {what}")
+        except (RuntimeError, OSError) as e:
+            if not sent:
+                raise
+            done = " and ".join(" and ".join(x["sizes"]) + " mm" for x in sent)
+            raise RuntimeError(f"{e} The {done} test slices are already in {row['name']}'s queue, so send only "
+                               f"the rest again (or take them out of the queue first).")
         sent.append({"file": os.path.basename(dst), "sizes": sizes_here, "id": ans.get("id"), "ready": bool(ans.get("ready")),
                      "ahead": int(ans.get("ahead") or 0), "problem": ans.get("problem")})
     progress("Done")
@@ -1780,6 +1803,10 @@ def build_enqueue(args, snap):
         raise RuntimeError("Load a scan first.")
     with BUILDS["lock"]:
         send = bool(args.get("send"))
+        if send and any(j["name"] == name and j["state"] == "running" and j.get("send") for j in BUILDS["jobs"]):
+            # A second click would slice and queue the same test slices again, maybe on another printer.
+            raise RuntimeError("This scan's test slices are being sent now. Wait for that to finish; "
+                               "it says which printer's queue they went in.")
         same = next((j for j in BUILDS["jobs"] if j["name"] == name and j["state"] == "queued" and bool(j.get("send")) == send), None)
         bid = same["id"] if same else BUILDS["next"]
         pdir = os.path.join(PREVIEW_DIR, f"build-{bid}")
@@ -1833,7 +1860,10 @@ def _run_build(j):
     pdir = os.path.join(PREVIEW_DIR, f"build-{j['id']}")
     os.makedirs(pdir, exist_ok=True)
     job_path = os.path.join(pdir, "job.json")
-    _write_json(job_path, {"name": j["name"], "preview_dir": pdir, "url_dir": f"build-{j['id']}", "args": j["args"],
+    args = dict(j["args"])
+    if isinstance(args.get("settings"), dict):  # the worker reads the GnomeWork token from settings.json, not a temp file
+        args["settings"] = {k: v for k, v in args["settings"].items() if k != "gnomework_token"}
+    _write_json(job_path, {"name": j["name"], "preview_dir": pdir, "url_dir": f"build-{j['id']}", "args": args,
                            "scan": os.path.join(pdir, "scan.stl"), "spouts": j.get("spouts") or []})
     flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
     proc = subprocess.Popen(_worker_cmd(job_path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
