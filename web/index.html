@@ -568,7 +568,7 @@
                 <label for="test_slice_mm" title="Two layers: 0.56 mm prints as 2 layers of 0.28 mm">Thickness (mm)<input id="test_slice_mm" data-set type="number" step="0.01" min="0.1" max="20"></label>
                 <label for="test_slice_at" title="How far up the piece a level test slice is cut">Level slice height (%)<input id="test_slice_at" data-set data-pct type="number" step="5" min="5" max="95"></label>
                 <label for="test_slice_band" title="A test slice is a band round the latex shaped like the contour shell, whatever the shell style. This many times Contour thickness wide.">Width (× contour)<input id="test_slice_band" data-set type="number" step="0.5" min="1" max="10"></label>
-                <label for="test_size_step_mm" title="Send test slices prints two sizes: the scan as it is, and this many mm wider across the cut-out. Each has its size cut into it. Negative for smaller.">Second size (mm)<input id="test_size_step_mm" data-set type="number" step="0.5" min="-20" max="20"></label>
+                <label for="test_size_step_mm" title="Send test slices prints two sizes: the scan at its height now, and grown evenly to this many mm taller. Each has that height cut into it, the number to type under Scan, Size. Negative for smaller.">Second size (mm)<input id="test_size_step_mm" data-set type="number" step="0.5" min="-20" max="20"></label>
                 <label class="check" for="test_slice_whole" title="One slice in one piece, ignoring the cuts. Untick to get a piece of slice for each shell piece it crosses."><input id="test_slice_whole" data-set type="checkbox"> One piece (ignore the cuts)</label>
               </div>
               <p class="muted small" id="sliceNote"></p>

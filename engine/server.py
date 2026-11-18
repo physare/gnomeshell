@@ -889,7 +889,7 @@ def job_load_recent(name):
 # ------------------------------------------------------------ scan prep
 
 def _mm_text(x):
-    """84 for 84.0, 84.5 for 84.5: the size cut into a test slice."""
+    """118 for 118.0, 118.5 for 118.5: the scan height cut into a test slice."""
     x = round(float(x), 1)
     return f"{x:.0f}" if abs(x - round(x)) < 0.05 else f"{x:.1f}"
 
@@ -916,9 +916,9 @@ def _layer_for(thick_mm):
 
 
 def job_send_test(cuts, settings, pieces=None, frame=None):
-    """Send test slices: the test slice at the scan's size and at a second size
-    (Second size mm wider across the cut-out), each with its size cut into its
-    top, sliced in Bambu Studio for a free printer GnomeWork knows (or the one
+    """Send test slices: the test slice at the scan's height and at a second
+    height (Second size mm taller, grown evenly), each with that height cut
+    into its top, sliced in Bambu Studio for a free printer GnomeWork knows (or the one
     with the shortest queue), and put in that printer's queue. Both go on one
     plate if they fit, otherwise one after the other. Nothing starts: a person
     presses Start in GnomeWork and ticks Bed is clear."""
@@ -952,11 +952,14 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
     if not plan:
         raise RuntimeError("Add a cut first, so GnomeShell knows where the test slice goes.")
     pt, n = Vector(plan["point"]), Vector(plan["normal"]).normalized()
-    w0 = ms.slice_section_width(latex, pt, n)
-    if not w0:
+    if not ms.slice_section_width(latex, pt, n):
         raise RuntimeError("The test slice misses the scan. Drag its pink dot onto the model and try again.")
+    # Each test size is the whole scan at a height, the height you'd type under Scan, Size:
+    # the scan as it is, and Second size mm taller (grown evenly). That height is cut into the slice.
+    co_now, _ = ms._world_tris(latex)
+    h0 = float(np.ptp(co_now[:, 2]))
     step = float(settings.get("test_size_step_mm", 2.0))
-    sizes = [w0, w0 + step] if abs(step) >= 0.05 else [w0]
+    sizes = [h0, h0 + step] if abs(step) >= 0.05 else [h0]
     if min(sizes) < 5:
         raise RuntimeError("The second size is too small. Change Second size under Settings, Test slice.")
 
@@ -969,12 +972,12 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
                       pour_extend_mm=settings["pour_extend_mm"], pour_flare_deg=settings["pour_flare_deg"],
                       spouts=_spouts(latex))
     layer = _layer_for(float(settings["test_slice_mm"]))
-    items, labels = [], []
+    items, labels, unlabelled = [], [], []
     for k, size in enumerate(sizes):
         label = _mm_text(size)
         labels.append(label)
-        progress(f"Cutting the {label} mm test slice")
-        old = ms.scale_about_section(latex, pt, n, size / w0) if k else None
+        progress(f"Cutting the test slice at {label} mm tall")
+        old = ms.scale_about_section(latex, pt, n, size / h0) if k else None
         try:
             out, _ = ms.build_test_slices(latex, units="MM", explode_mm=0, cuts=cut_list, pieces=[dict(x) for x in (pieces or [])],
                                           frame=frame, **contour_kw)
@@ -984,9 +987,10 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
                 bpy.context.view_layer.update()
         if not out:
             raise RuntimeError("The test slice didn't reach the shell. Move its pink dot and try again.")
-        progress(f"Cutting {label} into the {label} mm test slice")
+        progress(f"Cutting {label} into that slice")
         for o in out:
-            ms.engrave_label(o, label, layer)
+            if ms.engrave_label(o, label, layer) is None:
+                unlabelled.append(label)  # no room for the number: say so, so the slices aren't mixed up
             co, tris = ms._world_tris(o)
             B = ms.test_flat_basis(o)
             if np.linalg.det(B) < 0:
@@ -1016,7 +1020,7 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
             named.append((f"Test slice {it['name']}", co @ R.T + np.array(it["off"]), tris))
         these = [nm for nm, _, _, lab in items if any(it["name"] == nm for it in pl)]
         sizes_here = sorted({lab for nm, _, _, lab in items if nm in these}, key=float)
-        what = " and ".join(sizes_here) + " mm"
+        what = " and ".join(sizes_here) + " mm tall"
         src = os.path.join(send_dir, f"{name} test slices {what}.3mf")
         ms.write_3mf(src, named, W, arrange=False, keep=True)
         progress(f"Slicing the {what} test slice{'s' if len(sizes_here) > 1 else ''} in Bambu Studio for {row['model']}")
@@ -1028,14 +1032,15 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
         except (RuntimeError, OSError) as e:
             if not sent:
                 raise
-            done = " and ".join(" and ".join(x["sizes"]) + " mm" for x in sent)
+            done = " and ".join(" and ".join(x["sizes"]) + " mm tall" for x in sent)
             raise RuntimeError(f"{e} The {done} test slices are already in {row['name']}'s queue, so send only "
                                f"the rest again (or take them out of the queue first).")
         sent.append({"file": os.path.basename(dst), "sizes": sizes_here, "id": ans.get("id"), "ready": bool(ans.get("ready")),
                      "ahead": int(ans.get("ahead") or 0), "problem": ans.get("problem")})
     progress("Done")
     return {"send": {"printer": row["name"], "model": row["model"], "picked": why, "sizes": labels, "prints": sent,
-                     "ready": bool(sent and sent[0]["ready"]), "folder": send_dir, "gnomework": url.rstrip("/")},
+                     "ready": bool(sent and sent[0]["ready"]), "folder": send_dir, "gnomework": url.rstrip("/"),
+                     "unlabelled": sorted(set(unlabelled), key=float)},
             "name": STATE.get("name"), "folder": folder, "seconds": round(time.time() - t0), "slices_only": True}
 
 
