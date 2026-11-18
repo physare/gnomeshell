@@ -50,7 +50,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.17.3"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.17.4"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -889,7 +889,7 @@ def job_load_recent(name):
 # ------------------------------------------------------------ scan prep
 
 def _mm_text(x):
-    """84 for 84.0, 84.5 for 84.5: the size cut into a test slice."""
+    """118 for 118.0, 118.5 for 118.5: the scan height cut into a test slice."""
     x = round(float(x), 1)
     return f"{x:.0f}" if abs(x - round(x)) < 0.05 else f"{x:.1f}"
 
@@ -900,10 +900,25 @@ def _slicer_for(settings):
     return studio, bambu.Profiles(bambu.profiles_dir(studio))
 
 
+MAX_LAYER_MM = 0.28  # the thickest layer a 0.4 mm nozzle prints well (Bambu's own Extra Draft)
+MIN_LAYER_MM = 0.08
+
+
+def _layer_for(thick_mm):
+    """The layer height that prints thick_mm in whole layers, none over 0.28 mm:
+    0.56 mm is two 0.28 mm layers, 1 mm is four 0.25 mm layers."""
+    n = max(1, math.ceil(thick_mm / MAX_LAYER_MM - 1e-6))
+    layer = thick_mm / n
+    if layer < MIN_LAYER_MM - 1e-9:
+        raise RuntimeError(f"A {thick_mm:g} mm test slice is thinner than one printed layer. Set Test slice thickness to "
+                           f"{MIN_LAYER_MM:g} mm or more under Settings, Test slice.")
+    return round(layer, 4)
+
+
 def job_send_test(cuts, settings, pieces=None, frame=None):
-    """Send test slices: the test slice at the scan's size and at a second size
-    (Second size mm wider across the cut-out), each with its size cut into its
-    top, sliced in Bambu Studio for a free printer GnomeWork knows (or the one
+    """Send test slices: the test slice at the scan's height and at a second
+    height (Second size mm taller, grown evenly), each with that height cut
+    into its top, sliced in Bambu Studio for a free printer GnomeWork knows (or the one
     with the shortest queue), and put in that printer's queue. Both go on one
     plate if they fit, otherwise one after the other. Nothing starts: a person
     presses Start in GnomeWork and ticks Bed is clear."""
@@ -912,7 +927,8 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
         raise RuntimeError("Load a scan first.")
     check_settings(settings)
     t0 = time.time()
-    url, token = settings.get("gnomework_url") or gw.DEFAULT_URL, settings.get("gnomework_token") or ""
+    url = settings.get("gnomework_url") or gw.DEFAULT_URL
+    token = settings.get("gnomework_token") or load_settings().get("gnomework_token") or ""
 
     progress("Asking GnomeWork which printers are free")
     rows = gw.printers(url, token)
@@ -936,11 +952,14 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
     if not plan:
         raise RuntimeError("Add a cut first, so GnomeShell knows where the test slice goes.")
     pt, n = Vector(plan["point"]), Vector(plan["normal"]).normalized()
-    w0 = ms.slice_section_width(latex, pt, n)
-    if not w0:
+    if not ms.slice_section_width(latex, pt, n):
         raise RuntimeError("The test slice misses the scan. Drag its pink dot onto the model and try again.")
+    # Each test size is the whole scan at a height, the height you'd type under Scan, Size:
+    # the scan as it is, and Second size mm taller (grown evenly). That height is cut into the slice.
+    co_now, _ = ms._world_tris(latex)
+    h0 = float(np.ptp(co_now[:, 2]))
     step = float(settings.get("test_size_step_mm", 2.0))
-    sizes = [w0, w0 + step] if abs(step) >= 0.05 else [w0]
+    sizes = [h0, h0 + step] if abs(step) >= 0.05 else [h0]
     if min(sizes) < 5:
         raise RuntimeError("The second size is too small. Change Second size under Settings, Test slice.")
 
@@ -952,13 +971,13 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
                       test_slice_band=float(settings["test_slice_band"]), test_slice_whole=bool(settings["test_slice_whole"]),
                       pour_extend_mm=settings["pour_extend_mm"], pour_flare_deg=settings["pour_flare_deg"],
                       spouts=_spouts(latex))
-    layer = float(settings["test_slice_mm"]) / 2  # two layers
-    items, labels = [], []
+    layer = _layer_for(float(settings["test_slice_mm"]))
+    items, labels, unlabelled = [], [], []
     for k, size in enumerate(sizes):
         label = _mm_text(size)
         labels.append(label)
-        progress(f"Cutting the {label} mm test slice")
-        old = ms.scale_about_section(latex, pt, n, size / w0) if k else None
+        progress(f"Cutting the test slice at {label} mm tall")
+        old = ms.scale_about_section(latex, pt, n, size / h0) if k else None
         try:
             out, _ = ms.build_test_slices(latex, units="MM", explode_mm=0, cuts=cut_list, pieces=[dict(x) for x in (pieces or [])],
                                           frame=frame, **contour_kw)
@@ -968,9 +987,10 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
                 bpy.context.view_layer.update()
         if not out:
             raise RuntimeError("The test slice didn't reach the shell. Move its pink dot and try again.")
-        progress(f"Cutting {label} into the {label} mm test slice")
+        progress(f"Cutting {label} into that slice")
         for o in out:
-            ms.engrave_label(o, label, layer)
+            if ms.engrave_label(o, label, layer) is None:
+                unlabelled.append(label)  # no room for the number: say so, so the slices aren't mixed up
             co, tris = ms._world_tris(o)
             B = ms.test_flat_basis(o)
             if np.linalg.det(B) < 0:
@@ -1000,19 +1020,27 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
             named.append((f"Test slice {it['name']}", co @ R.T + np.array(it["off"]), tris))
         these = [nm for nm, _, _, lab in items if any(it["name"] == nm for it in pl)]
         sizes_here = sorted({lab for nm, _, _, lab in items if nm in these}, key=float)
-        what = " and ".join(sizes_here) + " mm"
+        what = " and ".join(sizes_here) + " mm tall"
         src = os.path.join(send_dir, f"{name} test slices {what}.3mf")
         ms.write_3mf(src, named, W, arrange=False, keep=True)
         progress(f"Slicing the {what} test slice{'s' if len(sizes_here) > 1 else ''} in Bambu Studio for {row['model']}")
         dst = os.path.join(send_dir, f"{name} test slices {what}.gcode.3mf")
-        bambu.slice_plate(studio, src, dst, row["model"], layer_mm=layer, filament=settings.get("print_filament") or "Bambu PLA Basic")
-        progress(f"Putting it in {row['name']}'s queue")
-        ans = gw.queue_file(url, token, row["id"], dst, f"{name} test slice{'s' if len(sizes_here) > 1 else ''} {what}")
+        try:
+            bambu.slice_plate(studio, src, dst, row["model"], layer_mm=layer, filament=settings.get("print_filament") or "Bambu PLA Basic")
+            progress(f"Putting it in {row['name']}'s queue")
+            ans = gw.queue_file(url, token, row["id"], dst, f"{name} test slice{'s' if len(sizes_here) > 1 else ''} {what}")
+        except (RuntimeError, OSError) as e:
+            if not sent:
+                raise
+            done = " and ".join(" and ".join(x["sizes"]) + " mm tall" for x in sent)
+            raise RuntimeError(f"{e} The {done} test slices are already in {row['name']}'s queue, so send only "
+                               f"the rest again (or take them out of the queue first).")
         sent.append({"file": os.path.basename(dst), "sizes": sizes_here, "id": ans.get("id"), "ready": bool(ans.get("ready")),
                      "ahead": int(ans.get("ahead") or 0), "problem": ans.get("problem")})
     progress("Done")
     return {"send": {"printer": row["name"], "model": row["model"], "picked": why, "sizes": labels, "prints": sent,
-                     "ready": bool(sent and sent[0]["ready"]), "folder": send_dir, "gnomework": url.rstrip("/")},
+                     "ready": bool(sent and sent[0]["ready"]), "folder": send_dir, "gnomework": url.rstrip("/"),
+                     "unlabelled": sorted(set(unlabelled), key=float)},
             "name": STATE.get("name"), "folder": folder, "seconds": round(time.time() - t0), "slices_only": True}
 
 
@@ -1780,6 +1808,10 @@ def build_enqueue(args, snap):
         raise RuntimeError("Load a scan first.")
     with BUILDS["lock"]:
         send = bool(args.get("send"))
+        if send and any(j["name"] == name and j["state"] == "running" and j.get("send") for j in BUILDS["jobs"]):
+            # A second click would slice and queue the same test slices again, maybe on another printer.
+            raise RuntimeError("This scan's test slices are being sent now. Wait for that to finish; "
+                               "it says which printer's queue they went in.")
         same = next((j for j in BUILDS["jobs"] if j["name"] == name and j["state"] == "queued" and bool(j.get("send")) == send), None)
         bid = same["id"] if same else BUILDS["next"]
         pdir = os.path.join(PREVIEW_DIR, f"build-{bid}")
@@ -1833,7 +1865,10 @@ def _run_build(j):
     pdir = os.path.join(PREVIEW_DIR, f"build-{j['id']}")
     os.makedirs(pdir, exist_ok=True)
     job_path = os.path.join(pdir, "job.json")
-    _write_json(job_path, {"name": j["name"], "preview_dir": pdir, "url_dir": f"build-{j['id']}", "args": j["args"],
+    args = dict(j["args"])
+    if isinstance(args.get("settings"), dict):  # the worker reads the GnomeWork token from settings.json, not a temp file
+        args["settings"] = {k: v for k, v in args["settings"].items() if k != "gnomework_token"}
+    _write_json(job_path, {"name": j["name"], "preview_dir": pdir, "url_dir": f"build-{j['id']}", "args": args,
                            "scan": os.path.join(pdir, "scan.stl"), "spouts": j.get("spouts") or []})
     flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
     proc = subprocess.Popen(_worker_cmd(job_path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
