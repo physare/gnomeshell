@@ -50,7 +50,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.17.4"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.17.5"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -941,11 +941,13 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
         except bambu.SliceError:
             return False
 
-    row, why = gw.pick_printer(rows, can)
+    row, why = gw.pick_printer(rows, can)  # only to stop early when no printer could take it at all
     if row is None:
         raise RuntimeError(why)
-    W, D, H = bambu.bed_of(prof.machine(row["model"]))
-    W, D, H = W or float(settings["bed_mm"]), D or float(settings.get("bed_d_mm") or settings["bed_mm"]), H or float(settings["bed_h_mm"])
+
+    def bed(model):
+        W, D, H = bambu.bed_of(prof.machine(model))
+        return W or float(settings["bed_mm"]), D or float(settings.get("bed_d_mm") or settings["bed_mm"]), H or float(settings["bed_h_mm"])
 
     # where the slice goes: as the app planned it
     plan = next((pc.get("slice") for pc in (pieces or []) if (pc.get("slice") or {}).get("point")), None)
@@ -1001,12 +1003,23 @@ def job_send_test(cuts, settings, pieces=None, frame=None):
             items.append((f"{label} mm" + ("" if tag == ms.WHOLE else f", piece {tag}"), flat, tris, label))
             ms._remove(o)
 
-    # one plate if they all fit on this printer, otherwise a plate (and a print) each
-    progress("Setting them out on the plate")
+    # Which printer, now the slices are cut: a free one, the fewest plates, then the
+    # smallest plate they fit (a free A1 before an A2L). One plate if they fit.
+    progress("Picking the printer and setting them out on its plate")
     got = {nm: (co, tris) for nm, co, tris, _ in items}
-    plan_ = ms.plan_plates([(nm, co) for nm, co, _, _ in items], W, D, H)
-    if any(it.get("too_big") for pl in plan_ for it in pl):
-        raise RuntimeError(f"A test slice is bigger than {row['name']}'s plate.")
+    plans = {}
+    for r in rows:
+        m = r.get("model")
+        if m and m not in plans and can(m):
+            W_, D_, H_ = bed(m)
+            pl = ms.plan_plates([(nm, co) for nm, co, _, _ in items], W_, D_, H_)
+            plans[m] = None if any(it.get("too_big") for p_ in pl for it in p_) else (pl, W_ * D_, (W_, D_, H_))
+    row, why = gw.pick_printer(rows, lambda m: bool(plans.get(m)), lambda r: (len(plans[r["model"]][0]), plans[r["model"]][1]))
+    if row is None:
+        if not any(plans.values()):
+            raise RuntimeError("A test slice is bigger than every printer's plate.")
+        raise RuntimeError(why)
+    plan_, _, (W, D, H) = plans[row["model"]]
     folder = STATE["folder"]
     send_dir = os.path.join(folder, "test prints")
     os.makedirs(send_dir, exist_ok=True)

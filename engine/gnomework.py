@@ -73,20 +73,24 @@ def queue_file(base, token, printer_id, path, title):
                  {"Content-Type": f"multipart/form-data; boundary={boundary}"}, timeout=120)
 
 
-def pick_printer(rows, can_slice):
+def pick_printer(rows, can_slice, rank=None):
     """The printer to send to: a free one first, else the one with the
     shortest queue that is only busy (not switched off or unwatched).
-    can_slice(model) says whether Bambu Studio has a profile for it.
+    can_slice(model) says whether Bambu Studio has a profile for it (and, when
+    the slices are cut, whether they fit its plate). rank(row) orders printers
+    that are equally free: fewest plates, then the smallest plate, so a free A1
+    takes test slices that fit it and an A2L keeps its big plate free.
     Returns (row, why) or (None, reason in words)."""
     ok = [r for r in rows if r.get("model") and can_slice(r["model"])]
     if not ok:
         names = ", ".join(r.get("name", "?") for r in rows) or "none"
-        return None, f"None of GnomeWork's printers ({names}) is a model Bambu Studio can slice for."
+        return None, f"None of GnomeWork's printers ({names}) is a model Bambu Studio can slice for that the test slices fit."
+    order = (lambda r: (tuple(rank(r)), rows.index(r))) if rank else (lambda r: (rows.index(r),))
     free = [r for r in ok if r.get("state") == "free"]
     if free:
-        return free[0], "free"
+        return min(free, key=order), "free"
     busy = [r for r in ok if r.get("state") == "busy"]
     if busy:
-        return min(busy, key=lambda r: (int(r.get("queued") or 0), rows.index(r))), "queued"
+        return min(busy, key=lambda r: (int(r.get("queued") or 0),) + order(r)), "queued"
     why = "; ".join(f"{r['name']}: {r.get('problem')}" for r in ok if r.get("problem"))
     return None, "No printer can take it now. " + why
