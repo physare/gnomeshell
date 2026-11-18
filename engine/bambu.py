@@ -68,6 +68,10 @@ def _norm(model):
     return re.sub(r"[^a-z0-9]+", "", m.lower())
 
 
+# What a template brings is its settings, not its own name or kind.
+_OWN_KEYS = {"name", "inherits", "include", "instantiation", "type", "from", "setting_id", "filament_id", "version"}
+
+
 class Profiles:
     """Bambu Studio's system profiles, by name, with inheritance resolved."""
 
@@ -117,6 +121,7 @@ class Profiles:
                 if m.get("model_id") and m.get("name"):
                     self.models[_norm(m["name"])] = m["model_id"]
         self._cache = {}
+        self._scanned = {}
 
     def model_id(self, model):
         """The code Bambu Studio's file should name for a printer model (N9 for an A2L)."""
@@ -125,15 +130,42 @@ class Profiles:
             raise SliceError(f"Bambu Studio doesn't list a model code for the {model}. Update Bambu Studio, then try again.")
         return code
 
-    def raw(self, kind, name):
+    def _find(self, kind, name):
+        """The file of a profile by its name: from the index, else any file in
+        that folder (or the whole BBL folder) whose name or "name" matches.
+        Templates pulled in by "include" may not be in the index."""
         p = self.index[kind].get(name)
-        if not p or not os.path.isfile(p):
+        if p and os.path.isfile(p):
+            return p
+        for folder in (os.path.join(self.dir, kind), self.dir):
+            exact = os.path.join(folder, name + ".json")
+            if os.path.isfile(exact):
+                return exact
+        if name not in self._scanned:
+            self._scanned[name] = None
+            for q in glob.glob(os.path.join(self.dir, "**", "*.json"), recursive=True):
+                try:
+                    with open(q, encoding="utf-8") as f:
+                        if json.load(f).get("name") == name:
+                            self._scanned[name] = q
+                            break
+                except (OSError, ValueError, AttributeError):
+                    continue
+        return self._scanned.get(name)
+
+    def raw(self, kind, name):
+        p = self._find(kind, name)
+        if not p:
             raise SliceError(f"Bambu Studio has no {kind} profile called \"{name}\".")
         with open(p, encoding="utf-8") as f:
             return json.load(f)
 
     def full(self, kind, name, _depth=0):
-        """The profile with everything it inherits filled in."""
+        """The profile with everything it inherits filled in, the way Bambu
+        Studio reads it: what it inherits, then what it includes, then its own.
+        Bambu Studio 2.x keeps each printer's own start, end and filament change
+        G-code in template files a printer profile names under "include"; without
+        them the slice gets the generic start code, which never loads filament."""
         key = (kind, name)
         if key in self._cache:
             return dict(self._cache[key])
@@ -142,10 +174,25 @@ class Profiles:
         me = self.raw(kind, name)
         parent = me.get("inherits")
         out = self.full(kind, parent, _depth + 1) if parent else {}
+        inc = me.get("include") or []
+        for t in [inc] if isinstance(inc, str) else inc:
+            tpl = self.full(kind, t, _depth + 1)
+            out.update({k: v for k, v in tpl.items() if k not in _OWN_KEYS})
         out.update(me)
         out.pop("inherits", None)
+        out.pop("include", None)
         self._cache[key] = dict(out)
         return out
+
+    def root_value(self, kind, name, key):
+        """key as the profile at the top of name's inherits chain has it (the
+        generic base Bambu Studio falls back on)."""
+        seen = 0
+        me = self.raw(kind, name)
+        while me.get("inherits") and seen < 20:
+            me = self.raw(kind, me["inherits"])
+            seen += 1
+        return self.full(kind, me["name"]).get(key) if me.get("name") else me.get(key)
 
     def usable(self, kind):
         """The profiles a person can pick (not the hidden base ones)."""
@@ -258,6 +305,17 @@ def _stamp_model(path, code):
     os.replace(tmp, path)
 
 
+def _gcode_has(path, text):
+    """Whether the plate's G-code has text in it."""
+    with zipfile.ZipFile(path) as z:
+        for n in z.namelist():
+            if re.fullmatch(r"Metadata/plate_\d+\.gcode", n):
+                with z.open(n) as f:
+                    if text.encode() in f.read():
+                        return True
+    return False
+
+
 def _studio_error(work):
     """Bambu Studio puts the reason it stopped in result.json (not on stdout)."""
     try:
@@ -278,6 +336,11 @@ def slice_plate(studio, src_3mf, out_path, model, layer_mm=0.28, filament="Bambu
     process = prof.process(machine["name"], layer_mm)
     fil = prof.filament(machine["name"], filament)
     code = prof.model_id(machine.get("printer_model") or model)
+    start = machine.get("machine_start_gcode") or ""
+    if not start.strip() or start == prof.root_value("machine", machine["name"], "machine_start_gcode"):
+        # The generic start code doesn't load filament: the print would run with an empty nozzle.
+        raise SliceError(f"Couldn't find Bambu Studio's own start code for the {model}, so nothing was sliced. "
+                         "Update GnomeShell and Bambu Studio, then try again.")
     process.update(layer_height=f"{layer_mm:g}", initial_layer_print_height=f"{layer_mm:g}")
     if bed:
         process["curr_bed_type"] = bed  # otherwise Cool Plate, and the bed heats to only 35 C
@@ -312,6 +375,8 @@ def slice_plate(studio, src_3mf, out_path, model, layer_mm=0.28, filament="Bambu
         raise SliceError("Bambu Studio couldn't slice the test slices" + (": " + why if why else "."))
     _stamp_model(tmp_out, code)
     got = check_sliced(tmp_out)
+    if "M620" in start and not _gcode_has(tmp_out, "M620"):
+        raise SliceError("Bambu Studio's file doesn't load the filament, so it wasn't sent.")
     shutil.move(tmp_out, out_path)
     shutil.rmtree(work, ignore_errors=True)
     return got
