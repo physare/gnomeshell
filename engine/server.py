@@ -50,7 +50,7 @@ OUT_ROOT = os.path.join(HOME_DOCS if os.path.isdir(HOME_DOCS) else os.path.expan
 SETTINGS_FILE = os.path.join(OUT_ROOT, "settings.json")
 PREVIEW_DIR = tempfile.mkdtemp(prefix="moldshell_")
 PORT = int(os.environ.get("MOLDSHELL_PORT", "8765"))
-APP_VERSION = "0.17.6"  # the web screens check this, so a window never talks to an older engine
+APP_VERSION = "0.17.7"  # the web screens check this, so a window never talks to an older engine
 BOOT = f"{os.getpid()}-{int(time.time())}"  # tells an open window that a different engine has taken over
 
 DEFAULT_SETTINGS = {
@@ -2040,9 +2040,38 @@ def update_install():
                 f.write(new)
             os.replace(tmp, dest)
             changed += 1
-    if not os.environ.get("GNOMESHELL_NO_RESTART"):
-        threading.Timer(1.0, _restart_engine).start()
-    return {"ok": True, "version": info["latest"], "changed": changed}
+    waiting = _work_waiting()
+    if not os.environ.get("GNOMESHELL_NO_RESTART") and not STATE.get("restart_pending"):
+        STATE["restart_pending"] = info["latest"]
+        threading.Thread(target=_restart_when_free, daemon=True).start()
+    return {"ok": True, "version": info["latest"], "changed": changed, "waiting": waiting}
+
+
+def _work_waiting():
+    """What the restart has to wait for: a job running now, builds in the
+    queue and phone scans being made. Empty when it can go now."""
+    out = []
+    if STATE["busy"]:
+        out.append("job")
+    n = sum(1 for j in BUILDS["jobs"] if j["state"] in ("queued", "running"))
+    if n:
+        out.append(f"{n} build{'s' if n != 1 else ''}")
+    if PHONE is not None and PHONE.scans.busy():
+        out.append("phone scan")
+    return out
+
+
+def _restart_when_free():
+    """The update is on disk; start the new engine as soon as nothing is
+    running (the job on screen, queued builds, phone scans), after a couple of
+    quiet seconds so it doesn't land between two clicks."""
+    quiet = 0.0
+    while True:
+        time.sleep(0.5)
+        quiet = quiet + 0.5 if not _work_waiting() else 0.0
+        if quiet >= 2.0:
+            break
+    _restart_engine()
 
 
 def _restart_engine():
@@ -2115,7 +2144,8 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/ping":
             STATE["last_ping"] = time.time()
             STATE["bye_at"] = None
-            return self._send(200, {"ok": True, "version": APP_VERSION, "boot": BOOT, "restart_error": STATE.get("restart_error")})
+            return self._send(200, {"ok": True, "version": APP_VERSION, "boot": BOOT, "restart_error": STATE.get("restart_error"),
+                                    "restart_pending": STATE.get("restart_pending")})
         if p == "/api/status":
             return self._send(200, {"busy": STATE["busy"], "progress": STATE["progress"]})
         if p == "/api/settings":
@@ -2173,9 +2203,7 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/update_check":
                 return self._send(200, update_check(bool(data.get("force"))))
             if p == "/api/update_install":
-                if STATE["busy"] or builds_waiting():
-                    raise RuntimeError("Wait for GnomeShell to finish what it's doing (and any builds in the queue), then update.")
-                return self._send(200, update_install())
+                return self._send(200, update_install())  # busy or not: the restart waits its turn
             if p == "/api/load_recent":
                 return self._send(200, self._busy(job_load_recent, data["name"]))
             if p == "/api/prep":

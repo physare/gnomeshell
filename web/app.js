@@ -7,7 +7,7 @@ import { cutNormal, canonical, angles, evaluate, group, removalOrder, binFaces, 
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const APP_VERSION = "0.17.6"; // must match the engine's; an older engine left running is the usual reason it doesn't
+const APP_VERSION = "0.17.7"; // must match the engine's; an older engine left running is the usual reason it doesn't
 const OLD_ENGINE = "This window is talking to an older copy of GnomeShell that's still running in the background, so some buttons won't work. " +
   "Close this window and start GnomeShell again. If this message comes back, open Task Manager, end blender.exe, then start GnomeShell.";
 const api = async (path, body, raw) => {
@@ -3411,25 +3411,43 @@ $("#updIgnore").onclick = () => {
   try { localStorage.setItem("gs.skipUpdate", $("#updatePop").dataset.v); } catch (e) { /* not kept */ }
   $("#updatePop").hidden = true;
 };
-$("#updGo").onclick = () => {
-  const v = $("#updatePop").dataset.v;
+$("#updGo").onclick = () => updateNow($("#updatePop").dataset.v);
+// Downloads and installs straight away, even while something is running. The
+// engine restarts into the new version as soon as the job on screen, queued
+// builds and phone scans are done; the window then reloads by itself.
+async function updateNow(v) {
   $("#updatePop").hidden = true;
-  withBusy(`Updating GnomeShell to ${v}`, async () => {
+  let r;
+  await withBusy(`Downloading GnomeShell ${v}`, async () => {
     UPDATING = true;
-    try { await api("/api/update_install", {}); } catch (e) { UPDATING = false; throw e; }
-    $("#busySub").textContent = "Restarting with the new version…";
-    for (let i = 0; i < 45; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      try {
-        const j = await (await fetch("/api/ping")).json();
-        if (j.version === v) { location.reload(); return; }
-        if (j.restart_error) break;
-      } catch (e) { /* still restarting */ }
-    }
-    UPDATING = false;
-    throw new Error(`GnomeShell ${v} is installed, but it couldn't restart by itself. Close this window and open GnomeShell again from its shortcut.`);
+    try { r = await api("/api/update_install", {}); } catch (e) { UPDATING = false; throw e; }
   });
-};
+  if (!r) return;
+  if (r.waiting && r.waiting.length) {
+    const what = r.waiting.map((w) => w === "job" ? "what it's doing now" : w === "phone scan" ? "the phone scan" : `the ${w} in the queue`).join(" and ");
+    toast(`GnomeShell ${v} is installed. It restarts into it by itself when it finishes ${what}. Keep working; the window reloads then.`, true);
+  } else {
+    $("#busy").hidden = false; $("#busyTitle").textContent = `Updating GnomeShell to ${v}…`;
+    $("#busySub").textContent = "Restarting with the new version…";
+  }
+  waitForVersion(v, !(r.waiting && r.waiting.length));
+}
+async function waitForVersion(v, now) {
+  // a restart that waits for builds can take a long time: keep looking, slower once it's waiting
+  for (let i = 0; ; i++) {
+    await new Promise((res) => setTimeout(res, now ? 1000 : 3000));
+    try {
+      const j = await (await fetch("/api/ping")).json();
+      if (j.version === v) { location.reload(); return; }
+      if (j.restart_error) break;
+      if (j.restart_pending && !now) continue;
+    } catch (e) { /* restarting */ }
+    if (now && i > 45) break;
+  }
+  UPDATING = false;
+  $("#busy").hidden = true;
+  toast(`GnomeShell ${v} is installed, but it couldn't restart by itself. Close this window and open GnomeShell again from its shortcut.`);
+}
 addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", ""));
 
 // ------------------------------------------------------------ scan tabs
