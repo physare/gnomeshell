@@ -96,20 +96,71 @@ def is_floor(fl, min_floor=0.12, reach=1.3):
     return bool(fl) and fl[2] >= min_floor and fl[3] >= reach
 
 
-def find_bench(co, tris, up=(0.0, 0.0, 1.0), min_share=0.025, reach=1.2, min_above=0.25, min_below=0.03):
+def _hull_perimeter(pts):
+    """Perimeter of the convex hull of 2D points (monotone chain)."""
+    if len(pts) < 3:
+        return 0.0
+    if len(pts) > 4000:
+        pts = pts[np.random.default_rng(0).choice(len(pts), 4000, replace=False)]
+    P = sorted(map(tuple, np.round(pts, 6)))
+
+    def half(seq):
+        out = []
+        for q in seq:
+            while len(out) >= 2 and ((out[-1][0] - out[-2][0]) * (q[1] - out[-2][1]) - (out[-1][1] - out[-2][1]) * (q[0] - out[-2][0])) <= 0:
+                out.pop()
+            out.append(q)
+        return out
+    hull = half(P)[:-1] + half(P[::-1])[:-1]
+    if len(hull) < 2:
+        return 0.0
+    H = np.array(hull)
+    return float(np.linalg.norm(H - np.roll(H, -1, axis=0), axis=1).sum())
+
+
+def _solidity(cen, nor, area, d, tz, a, b, z0, z1, step):
+    """How closed in the scan is between heights z0 and z1 (along n): for each
+    slice, the length of wall going round it over the outline round all of it.
+    About 1 or more for a body (a bust, a gnome); well under 1 for legs, where
+    the outline round the legs is mostly air. The median over the slices, or
+    None when too few slices have anything in them. tz: each triangle's lowest
+    and highest height; a tall triangle counts in each slice it crosses, by the
+    part of it inside."""
+    if z1 - z0 < 2 * step:
+        return None
+    side = np.sqrt(np.clip(1 - nor[:, 2] ** 2, 0, 1)) if nor.shape[1] == 3 else 1.0
+    span = np.maximum(tz[:, 1] - tz[:, 0], 1e-9)
+    vals = []
+    for k in range(int((z1 - z0) / step)):
+        lo_ = z0 + k * step
+        part = np.clip(np.minimum(tz[:, 1], lo_ + step) - np.maximum(tz[:, 0], lo_), 0, None) / span
+        part = np.where(tz[:, 1] - tz[:, 0] < 1e-9, ((d >= lo_) & (d < lo_ + step)).astype(float), part)
+        sel = part > 0
+        if sel.sum() < 4:
+            continue
+        per = _hull_perimeter(np.stack([cen[sel] @ a, cen[sel] @ b], 1))
+        if per <= 0:
+            continue
+        vals.append(float((area[sel] * side[sel] * part[sel]).sum()) / step / per)
+    return float(np.median(vals)) if len(vals) >= 3 else None
+
+
+def find_bench(co, tris, up=(0.0, 0.0, 1.0), min_share=0.025, reach=1.1, min_above=0.25, min_below=0.03):
     """A bench or table top the object stands on, once the floor is gone (or
     when the scan never had one): (point, normal, cut height above the point),
     or None. `up` is which way is up (the scan is upright by then).
 
     Up-facing triangles are grouped by height; each big group is a candidate
-    top. A bench top has most of the object above it, reaches well past that
-    object's footprint, has something under it (its legs), and is a board: the
-    part sticking out past the object has an underside facing down just below
-    it and under the object too. A mold's own ledges fail that (under a gnome's
-    shoulders is solid body, not an underside; a hat brim is only a ring), and so
-    does a flange at the bottom (nothing under it).
-    The highest candidate that passes wins. When the underside wasn't scanned
-    nothing is found, and Keep box does it by hand."""
+    top. A bench top has most of the object above it, reaches past that
+    object's footprint and has something under it. Then either:
+    - under it the scan is see-through, just legs and rungs, while the object
+      above is closed all the way round (_solidity), or
+    - it's a board: the part sticking out past the object has an underside
+      facing down just below it, and under the object too.
+    A mold's own ledges fail both (under a gnome's shoulders or a hat brim is
+    the solid body, and no board underside), and so does a flange at the bottom
+    (nothing under it). The highest candidate that passes wins. When nothing
+    passes, Keep box does it by hand."""
     cen, nor, area = _faces(co, tris)
     tot = float(area.sum())
     if tot <= 0 or len(area) < 20:
@@ -169,7 +220,18 @@ def find_bench(co, tris, up=(0.0, 0.0, 1.0), min_share=0.025, reach=1.2, min_abo
         tx, ty = t @ a, t @ b
         if ext / max(foot, 1e-30) < reach:
             continue
-        # and it's a board, not the top of something solid (a gnome's shoulders):
+        # see-through underneath (legs), closed above (the object)
+        step = max(tol, (float(d.max()) - float(d.min())) / 60)
+        vz = (co - m) @ n
+        tz = np.stack([vz[tris].min(1), vz[tris].max(1)], 1)
+        nn = np.stack([np.zeros(len(nor)), np.zeros(len(nor)), nor @ n], 1)  # only the part along n matters
+        below_s = _solidity(cen, nn, area, d, tz, a, b, float(d.min()) + step, -3 * tol, step)
+        above_s = _solidity(cen, nn, area, d, tz, a, b, 3 * tol, 3 * tol + 0.3 * (float(d.max()) - 3 * tol), step)
+        if below_s is not None and above_s is not None and below_s < 0.8 and above_s >= 1.4 * below_s:
+            cut = float(np.percentile(d[top], 99)) + 0.004 * diag
+            best = (m, n, cut, share)
+            break
+        # or a board, not the top of something solid (a gnome's shoulders):
         # there's an underside, facing down, a little below the part that sticks out
         out_ = ~((tx >= fx.min()) & (tx <= fx.max()) & (ty >= fy.min()) & (ty <= fy.max()))
         stick = float(area[top][out_].sum())
