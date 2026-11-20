@@ -3039,9 +3039,14 @@ async function takeFile(file) {
 }
 $("#fileInput").onchange = (e) => takeFile(e.target.files[0]);
 const view = $("#view");
-["dragenter", "dragover"].forEach((t) => view.addEventListener(t, (e) => { e.preventDefault(); $("#drop").classList.add("over"); if (S.step !== "load") $("#drop").hidden = false; }));
-["dragleave", "drop"].forEach((t) => view.addEventListener(t, (e) => { e.preventDefault(); $("#drop").classList.remove("over"); if (S.step !== "load") $("#drop").hidden = true; }));
-view.addEventListener("drop", (e) => takeFile(e.dataTransfer.files[0]));
+// only a file dragged in from outside shows the drop screen: dragging the view round
+// can start the browser's own drag of a label or selected text, which isn't a file
+const dragsFile = (e) => !!e.dataTransfer && [...(e.dataTransfer.types || [])].includes("Files");
+["dragenter", "dragover"].forEach((t) => view.addEventListener(t, (e) => { if (!dragsFile(e)) return; e.preventDefault(); $("#drop").classList.add("over"); if (S.step !== "load") $("#drop").hidden = false; }));
+["dragleave", "drop"].forEach((t) => view.addEventListener(t, (e) => { if (!dragsFile(e)) return; e.preventDefault(); $("#drop").classList.remove("over"); if (S.step !== "load") $("#drop").hidden = true; }));
+view.addEventListener("drop", (e) => { if (dragsFile(e) && e.dataTransfer.files[0]) takeFile(e.dataTransfer.files[0]); });
+// and the view's own bits (labels, the canvas) are never dragged by the browser
+view.addEventListener("dragstart", (e) => { if (!dragsFile(e)) e.preventDefault(); });
 
 // a scan that came in only millimetres across gets scaled up on loading: say so
 function grownNote(info) {
